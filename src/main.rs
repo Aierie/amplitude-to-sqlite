@@ -7,10 +7,6 @@ use flate2::read::GzDecoder;
 use rusqlite::{params, Connection, Result};
 use serde_json::Value;
 
-// TODO: event time as column
-// TODO: formalise screen name recognition, nullable
-// TODO: formalise event name recognition
-// TODO: recognise non-client events ("path":"/2/httpapi") and mark as non-client
 // TODO: check that cleanup is executed when re-running
 // TODO: better duplicate detection
 
@@ -136,7 +132,6 @@ pub fn parse_json_objects_in_dir(dir: &Path) -> io::Result<Vec<ParsedItem>> {
                             Value::Object(map) => None,
                         }
                     });
-                // Not implemented for now
                 let screen_name: Option<String> = None;
                 results.push(ParsedItem {
                     user_id,
@@ -164,10 +159,6 @@ pub fn write_parsed_items_to_sqlite<P: AsRef<Path>>(
 ) -> Result<()> {
     let mut conn = Connection::open(db_path)?;
 
-    // TODO: upload time as column
-    // TODO: recognise non-client events ("path":"/2/httpapi") and mark as non-client
-    // TODO: formalise screen name recognition, nullable
-    // TODO: formalise event name recognition
     // TODO: check that cleanup is executed when re-running
     // TODO: better duplicate detection
 
