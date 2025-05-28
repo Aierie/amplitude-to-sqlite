@@ -24,6 +24,7 @@ pub struct ParsedItem {
     pub uuid: String,
     pub raw_json: String,
     pub source_file: String,
+    pub session_id: Option<u64>,
 }
 
 // Unzips all `.gz` files in a source directory into a destination directory
@@ -123,6 +124,18 @@ pub fn parse_json_objects_in_dir(dir: &Path) -> io::Result<Vec<ParsedItem>> {
                         io::Error::new(io::ErrorKind::InvalidData, "Missing event name")
                     })?
                     .to_string();
+                let session_id: Option<u64> = json
+                    .get("session_id")
+                    .and_then(|v| {
+                        match v {
+                            Value::Null => None,
+                            Value::Bool(_) => None,
+                            Value::Number(number) => number.as_u64(),
+                            Value::String(_) => None,
+                            Value::Array(values) => None,
+                            Value::Object(map) => None,
+                        }
+                    });
                 // Not implemented for now
                 let screen_name: Option<String> = None;
                 results.push(ParsedItem {
@@ -132,6 +145,7 @@ pub fn parse_json_objects_in_dir(dir: &Path) -> io::Result<Vec<ParsedItem>> {
                     server_event,
                     event_time,
                     screen_name,
+                    session_id,
                     raw_json: trimmed.to_string(),
                     source_file: file_name.clone(),
                 });
@@ -160,13 +174,14 @@ pub fn write_parsed_items_to_sqlite<P: AsRef<Path>>(
     // Ensure required tables exist
     conn.execute_batch(
         "
-        CREATE TABLE IF NOT EXISTS parsed_items (
+        CREATE TABLE IF NOT EXISTS amplitude_events (
             uuid TEXT PRIMARY KEY,
             user_id TEXT,
             event_screen TEXT,
             server_event INTEGER,
             event_time DATETIME NOT NULL,
             event_name TEXT NOT NULL,
+            session_id INTEGER,
             raw_json TEXT NOT NULL,
             source_file TEXT NOT NULL,
             created_at DATETIME NOT NULL
@@ -193,8 +208,8 @@ pub fn write_parsed_items_to_sqlite<P: AsRef<Path>>(
     {
         // Insert parsed items
         let mut stmt = tx.prepare(
-            "INSERT OR IGNORE INTO parsed_items (uuid, user_id, raw_json, source_file, created_at, event_screen, server_event, event_time, event_name)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            "INSERT OR IGNORE INTO amplitude_events (uuid, user_id, raw_json, source_file, created_at, event_screen, server_event, event_time, event_name, session_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         )?;
 
         for item in items {
@@ -208,6 +223,7 @@ pub fn write_parsed_items_to_sqlite<P: AsRef<Path>>(
                 if item.server_event { 1 } else { 0 },
                 item.event_time.to_rfc3339(),
                 item.event_name,
+                item.session_id,
             ])?;
             inserted += rows;
         }
