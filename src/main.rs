@@ -245,7 +245,8 @@ fn already_imported(conn: &Connection) -> Result<std::collections::HashSet<Strin
 
 // Main application entry point
 fn main() -> std::io::Result<()> {
-    let compressed_dir = Path::new("./658833");
+    // Modify this to the unzipped directory
+    let compressed_dir = Path::new("./YOUR_UNZIPPED_DIR");
     let unzipped_dir = Path::new("./data");
     let db_path = Path::new("parsed_data.sqlite");
 
