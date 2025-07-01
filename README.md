@@ -1,4 +1,5 @@
 - Run `fetch.sh` after defining `AMPLITUDE_PROJECT_API_KEY` and `AMPLITUDE_PROJECT_SECRET_KEY`.
 - Unzip `amplitude_export.zip`
+- Change `./YOUR_UNZIPPED_DIR` in the code to your real unzipped dirname
 - `cargo run`
 - Check output sqlite file
