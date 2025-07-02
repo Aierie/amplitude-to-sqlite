@@ -17,6 +17,8 @@ pub struct AmplitudeClient {
     endpoint: String,
     export_endpoint: String,
     secret_key: String,
+    transfer_project_api_key: Option<String>,
+    transfer_project_secret_key: Option<String>,
     client: reqwest::Client,
 }
 
@@ -28,6 +30,8 @@ impl AmplitudeClient {
             endpoint: endpoint.unwrap_or_else(|| DEFAULT_ENDPOINT.to_string()),
             export_endpoint: DEFAULT_EXPORT_ENDPOINT.to_string(),
             secret_key: String::new(), // Will be loaded from config when needed
+            transfer_project_api_key: None,
+            transfer_project_secret_key: None,
             client: reqwest::Client::new(),
         }
     }
@@ -39,18 +43,25 @@ impl AmplitudeClient {
             endpoint: config.endpoint,
             export_endpoint: config.export_endpoint,
             secret_key: config.secret_key,
+            transfer_project_api_key: config.transfer_project_api_key,
+            transfer_project_secret_key: config.transfer_project_secret_key,
             client: reqwest::Client::new(),
         }
     }
 
     /// Upload a batch of events to Amplitude.
+    /// 
+    /// This method requires transfer project API credentials to be configured.
+    /// The transfer_project_api_key must be set in the configuration file.
     ///
     /// # Example
     /// ```no_run
     /// use amplitude_to_sqlite::amplitude_types::Event;
     /// use amplitude_to_sqlite::amplitude_sdk::AmplitudeClient;
+    /// use amplitude_to_sqlite::config::AmplitudeConfig;
     /// # tokio_test::block_on(async {
-    /// let client = AmplitudeClient::new("YOUR_API_KEY", None);
+    /// let config = AmplitudeConfig::load().unwrap();
+    /// let client = AmplitudeClient::from_config(config);
     /// let event = Event {
     ///     user_id: Some("user@example.com".to_string()),
     ///     device_id: None,
@@ -92,8 +103,12 @@ impl AmplitudeClient {
     /// # });
     /// ```
     pub async fn send_events(&self, events: Vec<Event>) -> Result<BatchUploadResponse, Box<dyn Error>> {
+        // Require transfer project API key for batch uploads
+        let api_key = self.transfer_project_api_key.as_ref()
+            .ok_or("Transfer project API key is required for batch uploads. Please configure transfer_project_api_key in your config file.")?;
+        
         let req_body = BatchUploadRequest {
-            api_key: self.api_key.clone(),
+            api_key: api_key.clone(),
             events,
             options: None,
         };

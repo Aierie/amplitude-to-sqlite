@@ -9,6 +9,10 @@ pub struct AmplitudeConfig {
     pub endpoint: String,
     #[serde(default = "default_export_endpoint")]
     pub export_endpoint: String,
+    #[serde(default)]
+    pub transfer_project_api_key: Option<String>,
+    #[serde(default)]
+    pub transfer_project_secret_key: Option<String>,
 }
 
 fn default_endpoint() -> String {
@@ -60,6 +64,8 @@ impl AmplitudeConfig {
             secret_key,
             endpoint: default_endpoint(),
             export_endpoint: default_export_endpoint(),
+            transfer_project_api_key: None,
+            transfer_project_secret_key: None,
         })
     }
 
@@ -70,6 +76,8 @@ impl AmplitudeConfig {
             secret_key: "your_amplitude_project_secret_key_here".to_string(),
             endpoint: default_endpoint(),
             export_endpoint: default_export_endpoint(),
+            transfer_project_api_key: Some("your_transfer_project_api_key_here".to_string()),
+            transfer_project_secret_key: Some("your_transfer_project_secret_key_here".to_string()),
         };
 
         // Create parent directory if it doesn't exist
@@ -89,6 +97,7 @@ impl AmplitudeConfig {
 
         println!("Sample configuration file created at: {:?}", path);
         println!("Please edit the file and add your actual Amplitude API credentials.");
+        println!("Note: transfer_project_api_key and transfer_project_secret_key are required for batch upload operations.");
         
         Ok(())
     }
