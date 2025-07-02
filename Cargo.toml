@@ -1,5 +1,5 @@
 [package]
-name = "amplitude-things"
+name = "amplitude-cli"
 version = "0.1.0"
 edition = "2021"
 
@@ -12,3 +12,8 @@ chrono = "0.4"
 tempfile = "3.20.0"
 reqwest = { version = "0.11", features = ["json"] }
 tokio = { version = "1", features = ["full"] }
+clap = { version = "4.0", features = ["derive"] }
+zip = "0.5"
+config = "0.14"
+dirs = "5.0"
+toml = "0.8"

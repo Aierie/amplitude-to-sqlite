@@ -1,4 +1,5 @@
 use crate::amplitude_types::{BatchUploadRequest, BatchUploadResponse, Event};
+use crate::config::AmplitudeConfig;
 use chrono::{DateTime, Utc};
 use reqwest::StatusCode;
 use std::error::Error;
@@ -14,6 +15,8 @@ const DEFAULT_EXPORT_ENDPOINT: &str = "https://amplitude.com/api/2/export";
 pub struct AmplitudeClient {
     api_key: String,
     endpoint: String,
+    export_endpoint: String,
+    secret_key: String,
     client: reqwest::Client,
 }
 
@@ -23,6 +26,19 @@ impl AmplitudeClient {
         AmplitudeClient {
             api_key: api_key.into(),
             endpoint: endpoint.unwrap_or_else(|| DEFAULT_ENDPOINT.to_string()),
+            export_endpoint: DEFAULT_EXPORT_ENDPOINT.to_string(),
+            secret_key: String::new(), // Will be loaded from config when needed
+            client: reqwest::Client::new(),
+        }
+    }
+
+    /// Create a new AmplitudeClient from configuration.
+    pub fn from_config(config: AmplitudeConfig) -> Self {
+        AmplitudeClient {
+            api_key: config.api_key,
+            endpoint: config.endpoint,
+            export_endpoint: config.export_endpoint,
+            secret_key: config.secret_key,
             client: reqwest::Client::new(),
         }
     }
@@ -100,34 +116,42 @@ impl AmplitudeClient {
 
     /// Export events from Amplitude for a given date range.
     /// 
-    /// This method reads API credentials from environment variables:
-    /// - `AMPLITUDE_PROJECT_API_KEY`: Your Amplitude project API key
-    /// - `AMPLITUDE_PROJECT_SECRET_KEY`: Your Amplitude project secret key
+    /// This method uses the configuration loaded from config file or environment variables.
     ///
     /// # Example
     /// ```no_run
     /// use amplitude_to_sqlite::amplitude_sdk::AmplitudeClient;
     /// use chrono::{DateTime, Utc};
     /// # tokio_test::block_on(async {
-    /// let client = AmplitudeClient::new("dummy_key", None);
+    /// let config = AmplitudeConfig::load().unwrap();
+    /// let client = AmplitudeClient::from_config(config);
     /// let start = DateTime::parse_from_rfc3339("2024-12-01T00:00:00Z").unwrap().with_timezone(&Utc);
     /// let end = DateTime::parse_from_rfc3339("2025-05-26T23:59:59Z").unwrap().with_timezone(&Utc);
     /// let data = client.export_events(start, end).await.unwrap();
     /// # });
     /// ```
     pub async fn export_events(&self, start: DateTime<Utc>, end: DateTime<Utc>) -> Result<Vec<u8>, Box<dyn Error>> {
-        // Read credentials from environment variables
-        let api_key = env::var("AMPLITUDE_PROJECT_API_KEY")
-            .map_err(|_| "AMPLITUDE_PROJECT_API_KEY environment variable not set")?;
-        let secret_key = env::var("AMPLITUDE_PROJECT_SECRET_KEY")
-            .map_err(|_| "AMPLITUDE_PROJECT_SECRET_KEY environment variable not set")?;
+        // Use credentials from config if available, otherwise fall back to environment variables
+        let api_key = if !self.secret_key.is_empty() {
+            self.api_key.clone()
+        } else {
+            env::var("AMPLITUDE_PROJECT_API_KEY")
+                .map_err(|_| "AMPLITUDE_PROJECT_API_KEY environment variable not set")?
+        };
+        
+        let secret_key = if !self.secret_key.is_empty() {
+            self.secret_key.clone()
+        } else {
+            env::var("AMPLITUDE_PROJECT_SECRET_KEY")
+                .map_err(|_| "AMPLITUDE_PROJECT_SECRET_KEY environment variable not set")?
+        };
 
         // Format dates in the required format: YYYYMMDDTHH
         let start_str = start.format("%Y%m%dT%H").to_string();
         let end_str = end.format("%Y%m%dT%H").to_string();
 
         // Build the URL with query parameters
-        let url = format!("{}?start={}&end={}", DEFAULT_EXPORT_ENDPOINT, start_str, end_str);
+        let url = format!("{}?start={}&end={}", self.export_endpoint, start_str, end_str);
 
         // Make the request with basic auth
         let resp = self
