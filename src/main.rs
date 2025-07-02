@@ -128,8 +128,8 @@ pub fn parse_json_objects_in_dir(dir: &Path) -> io::Result<Vec<ParsedItem>> {
                             Value::Bool(_) => None,
                             Value::Number(number) => number.as_u64(),
                             Value::String(_) => None,
-                            Value::Array(values) => None,
-                            Value::Object(map) => None,
+                            Value::Array(_values) => None,
+                            Value::Object(_map) => None,
                         }
                     });
                 let screen_name: Option<String> = None;
@@ -306,13 +306,13 @@ mod tests {
 
         // Two gzip files, each with 2 JSON objects
         let fixture1 = r#"
-{ "user_id": "abc", "uuid": "uuid-0001", "data": "foo" }
-{ "user_id": null, "uuid": "uuid-0002", "data": "bar" }
+{ "user_id": "abc", "uuid": "uuid-0001", "data": {"path": "/test"}, "event_time": "2024-01-01 12:00:00.000000", "event_type": "test_event" }
+{ "user_id": null, "uuid": "uuid-0002", "data": {"path": "/"}, "event_time": "2024-01-01 12:01:00.000000", "event_type": "test_event" }
 "#;
 
         let fixture2 = r#"
-{ "user_id": "def", "uuid": "uuid-0003", "data": "baz" }
-{ "user_id": "ghi", "uuid": "uuid-0004", "data": "qux" }
+{ "user_id": "def", "uuid": "uuid-0003", "data": {"path": "/test"}, "event_time": "2024-01-01 12:02:00.000000", "event_type": "test_event" }
+{ "user_id": "ghi", "uuid": "uuid-0004", "data": {"path": "/"}, "event_time": "2024-01-01 12:03:00.000000", "event_type": "test_event" }
 "#;
 
         create_gzipped_fixture(compressed_dir.path(), "fixture1.gz", fixture1)
@@ -334,7 +334,7 @@ mod tests {
         // Verify SQLite contents
         let conn = Connection::open(&db_path).unwrap();
         let mut stmt = conn
-            .prepare("SELECT uuid, user_id, raw_json, source_file FROM parsed_items ORDER BY uuid")
+            .prepare("SELECT uuid, user_id, raw_json, source_file FROM amplitude_events ORDER BY uuid")
             .unwrap();
 
         let rows = stmt
@@ -356,22 +356,22 @@ mod tests {
         // Check some values for correctness and ordering by uuid
         assert_eq!(results[0].0, "uuid-0001");
         assert_eq!(results[0].1.as_deref(), Some("abc"));
-        assert!(results[0].2.contains("\"data\": \"foo\""));
+        assert!(results[0].2.contains("\"data\": {\"path\": \"/test\"}"));
         assert!(results[0].3.contains("fixture1"));
 
         assert_eq!(results[1].0, "uuid-0002");
         assert_eq!(results[1].1, None);
-        assert!(results[1].2.contains("\"data\": \"bar\""));
+        assert!(results[1].2.contains("\"data\": {\"path\": \"/\"}"));
         assert!(results[1].3.contains("fixture1"));
 
         assert_eq!(results[2].0, "uuid-0003");
         assert_eq!(results[2].1.as_deref(), Some("def"));
-        assert!(results[2].2.contains("\"data\": \"baz\""));
+        assert!(results[2].2.contains("\"data\": {\"path\": \"/test\"}"));
         assert!(results[2].3.contains("fixture2"));
 
         assert_eq!(results[3].0, "uuid-0004");
         assert_eq!(results[3].1.as_deref(), Some("ghi"));
-        assert!(results[3].2.contains("\"data\": \"qux\""));
+        assert!(results[3].2.contains("\"data\": {\"path\": \"/\"}"));
         assert!(results[3].3.contains("fixture2"));
     }
 }
