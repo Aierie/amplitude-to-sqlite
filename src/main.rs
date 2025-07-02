@@ -7,6 +7,9 @@ use flate2::read::GzDecoder;
 use rusqlite::{params, Connection, Result};
 use serde_json::Value;
 
+mod amplitude_types;
+mod amplitude_sdk;
+
 // TODO: check that cleanup is executed when re-running
 // TODO: better duplicate detection
 
