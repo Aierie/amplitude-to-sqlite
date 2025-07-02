@@ -132,7 +132,7 @@ impl AmplitudeClient {
     /// ```
     pub async fn export_events(&self, start: DateTime<Utc>, end: DateTime<Utc>) -> Result<Vec<u8>, Box<dyn Error>> {
         // Use credentials from config if available, otherwise fall back to environment variables
-        let api_key = if !self.secret_key.is_empty() {
+        let api_key = if !self.api_key.is_empty() {
             self.api_key.clone()
         } else {
             env::var("AMPLITUDE_PROJECT_API_KEY")

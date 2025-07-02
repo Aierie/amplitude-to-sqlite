@@ -32,7 +32,7 @@ pub async fn export_amplitude_data(
     
     // Parse dates
     let start = DateTime::parse_from_rfc3339(&format!("{}T00:00:00Z", start_date))?.with_timezone(&Utc);
-    let end = DateTime::parse_from_rfc3339(&format!("{}T23:59:59Z", end_date))?.with_timezone(&Utc);
+    let end = DateTime::parse_from_rfc3339(&format!("{}T23:00:00Z", end_date))?.with_timezone(&Utc);
     
     // Create output directory
     fs::create_dir_all(output_dir)?;
