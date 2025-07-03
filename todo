@@ -1,0 +1,8 @@
+check against schema for exported data
+strict parsing (no unknown fields)
+more timestamp things (only if relevant to the batch side)
+uuid vs other insert id differentiation for the exported event
+deduplication of non-uuid insert ids
+batch export
+
+diffing method for 2 sqlite files
