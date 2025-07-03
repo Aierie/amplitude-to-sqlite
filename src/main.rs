@@ -5,6 +5,7 @@ mod amplitude_types;
 mod amplitude_sdk;
 mod converter;
 mod config;
+mod verifier;
 
 #[derive(Parser)]
 #[command(name = "amplitude-cli")]
@@ -49,6 +50,13 @@ enum Commands {
         #[arg(long, default_value = "./amplitude.toml")]
         config_path: PathBuf,
     },
+
+    /// Verify round-trip deserialization of JSON files
+    VerifyDeserialization {
+        /// Directory containing JSON files to verify
+        #[arg(long)]
+        input_dir: PathBuf,
+    },
 }
 
 #[tokio::main]
@@ -64,6 +72,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Commands::Init { config_path } => {
             config::AmplitudeConfig::create_sample_config(config_path)?;
+        }
+        Commands::VerifyDeserialization { input_dir } => {
+            println!("Verifying JSON files in: {}", input_dir.display());
+            let results = verifier::verify_directory(input_dir)?;
+            verifier::print_verification_summary(&results);
         }
     }
 
