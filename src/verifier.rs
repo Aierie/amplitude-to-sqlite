@@ -75,6 +75,26 @@ pub fn verify_file(file_path: &Path) -> Result<VerificationResult, Box<dyn std::
                 continue;
             }
         };
+
+        if export_event.event_type.is_none() {
+            failed_events.push(EventError {
+                line_number,
+                error: "Event type is empty".to_string(),
+                original_json: line.clone(),
+            });
+            continue;
+        }
+
+        // Assert that insert_id is not empty
+        if export_event.insert_id.is_none() {
+            failed_events.push(EventError {
+                line_number,
+                error: "Insert ID is empty".to_string(),
+                original_json: line.clone(),
+            });
+            continue;
+        }
+
         
         // Try to serialize back to JSON
         let round_trip_json = match serde_json::to_string(&export_event) {
