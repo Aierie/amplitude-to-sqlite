@@ -69,6 +69,13 @@ pub async fn export_amplitude_data(
     }
     
     println!("Export extracted to: {:?}", output_dir);
+    
+    // Unzip all gzipped files in the extracted directory tree
+    let unzipped_files = unzip_gz_files_recursive(output_dir)?;
+    if !unzipped_files.is_empty() {
+        println!("Unzipped {} gzipped files", unzipped_files.len());
+    }
+    
     Ok(())
 }
 
@@ -118,6 +125,41 @@ fn unzip_gz_files(src_dir: &Path, dst_dir: &Path) -> io::Result<Vec<String>> {
             let mut writer = BufWriter::new(output_file);
 
             io::copy(&mut decoder, &mut writer)?;
+            processed_files.push(file_name);
+        }
+    }
+
+    Ok(processed_files)
+}
+
+// Recursively unzips all `.gz` files in a directory tree, replacing the original files
+fn unzip_gz_files_recursive(dir: &Path) -> io::Result<Vec<String>> {
+    let mut processed_files = Vec::new();
+
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+
+        if path.is_dir() {
+            // Recursively process subdirectories
+            let sub_processed = unzip_gz_files_recursive(&path)?;
+            processed_files.extend(sub_processed);
+        } else if path.extension().and_then(|s| s.to_str()) == Some("gz") {
+            // Unzip the file in place
+            let file_name = path.file_name().unwrap().to_string_lossy().to_string();
+            let output_name = path.file_stem().unwrap().to_string_lossy().to_string();
+            let dst_file_path = path.with_file_name(&output_name);
+
+            let input_file = File::open(&path)?;
+            let mut decoder = GzDecoder::new(BufReader::new(input_file));
+            let output_file = File::create(&dst_file_path)?;
+            let mut writer = BufWriter::new(output_file);
+
+            io::copy(&mut decoder, &mut writer)?;
+            
+            // Remove the original .gz file
+            fs::remove_file(&path)?;
+            
             processed_files.push(file_name);
         }
     }
