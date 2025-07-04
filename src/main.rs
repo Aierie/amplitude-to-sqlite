@@ -57,6 +57,17 @@ enum Commands {
         #[arg(long)]
         input_dir: PathBuf,
     },
+
+    /// Process JSON files and upload events via batch API
+    Upload {
+        /// Input directory containing JSON files with ExportEvents
+        #[arg(long)]
+        input_dir: PathBuf,
+        
+        /// Batch size for uploads (default: 1000)
+        #[arg(long, default_value = "1000")]
+        batch_size: usize,
+    },
 }
 
 #[tokio::main]
@@ -77,6 +88,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("Verifying JSON files in: {}", input_dir.display());
             let results = verifier::verify_directory(input_dir)?;
             verifier::print_verification_summary(&results);
+        }
+        Commands::Upload { input_dir, batch_size } => {
+            converter::process_and_upload_events(input_dir, *batch_size).await?;
         }
     }
 

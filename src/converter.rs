@@ -1,4 +1,5 @@
 use crate::amplitude_sdk::AmplitudeClient;
+use crate::amplitude_types::ExportEvent;
 use crate::config::AmplitudeConfig;
 use chrono::{DateTime, Utc};
 use flate2::read::GzDecoder;
@@ -33,6 +34,13 @@ pub async fn export_amplitude_data(
     // Parse dates
     let start = DateTime::parse_from_rfc3339(&format!("{}T00:00:00Z", start_date))?.with_timezone(&Utc);
     let end = DateTime::parse_from_rfc3339(&format!("{}T23:00:00Z", end_date))?.with_timezone(&Utc);
+    
+    // Clean up output directory if it exists
+    if output_dir.exists() {
+        println!("Cleaning up existing export directory: {:?}", output_dir);
+        fs::remove_dir_all(output_dir)?;
+        println!("Successfully cleaned up export directory");
+    }
     
     // Create output directory
     fs::create_dir_all(output_dir)?;
@@ -345,6 +353,118 @@ fn write_parsed_items_to_sqlite<P: AsRef<Path>>(
     Ok(())
 }
 
+/// Process JSON files containing ExportEvents, convert them to Events, order by time, and upload via batch API
+pub async fn process_and_upload_events(
+    input_dir: &std::path::Path,
+    batch_size: usize,
+) -> Result<(), Box<dyn std::error::Error>> {
+    println!("Processing JSON files from {:?} with batch size {}", input_dir, batch_size);
+    
+    // Load configuration and create client
+    let config = AmplitudeConfig::load()?;
+    let client = AmplitudeClient::from_config(config);
+    
+    // Parse all ExportEvents from JSON files
+    let export_events = parse_export_events_from_directory(input_dir)?;
+    println!("Parsed {} export events", export_events.len());
+    
+    // Convert ExportEvents to Events
+    let mut events = Vec::new();
+    for export_event in export_events {
+        match export_event.to_batch_event() {
+            Ok(event) => events.push(event),
+            Err(e) => {
+                eprintln!("Failed to convert export event to batch event: {}", e);
+                continue;
+            }
+        }
+    }
+    println!("Successfully converted {} events", events.len());
+    
+    // Sort events by time
+    events.sort_by_key(|event| event.time);
+    println!("Sorted events by timestamp");
+    
+    // Upload events in batches
+    let mut total_uploaded = 0;
+    let mut total_batches = 0;
+    
+    for (batch_index, chunk) in events.chunks(batch_size).enumerate() {
+        println!("Uploading batch {} ({} events)", batch_index + 1, chunk.len());
+        
+        match client.send_events(chunk.to_vec()).await {
+            Ok(response) => {
+                total_uploaded += chunk.len();
+                total_batches += 1;
+                println!("Batch {} uploaded successfully", batch_index + 1);
+                
+                // Log any warnings or issues from the response
+                if let Some(error) = &response.error {
+                    eprintln!("Warning: {}", error);
+                }
+                if let Some(missing_field) = &response.missing_field {
+                    eprintln!("Warning: Missing field: {}", missing_field);
+                }
+            }
+            Err(e) => {
+                eprintln!("Failed to upload batch {}: {}", batch_index + 1, e);
+                return Err(e);
+            }
+        }
+    }
+    
+    println!("Upload completed successfully!");
+    println!("Total events uploaded: {}", total_uploaded);
+    println!("Total batches: {}", total_batches);
+    
+    Ok(())
+}
+
+/// Parse all ExportEvents from JSON files in a directory
+fn parse_export_events_from_directory(dir: &Path) -> io::Result<Vec<ExportEvent>> {
+    let mut events = Vec::new();
+
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+
+        if path.is_file() {
+            let file_name = path.file_name().unwrap().to_string_lossy().to_string();
+            
+            // Check if it's a JSON file
+            if let Some(extension) = path.extension() {
+                if extension != "json" {
+                    continue;
+                }
+            }
+            
+            println!("Processing file: {}", file_name);
+            let file = File::open(&path)?;
+            let reader = BufReader::new(file);
+
+            for (line_number, line_result) in reader.lines().enumerate() {
+                let line = line_result?;
+                let trimmed = line.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+
+                let export_event: ExportEvent = match serde_json::from_str(trimmed) {
+                    Ok(event) => event,
+                    Err(e) => {
+                        eprintln!("Failed to parse JSON in {} line {}: {}", file_name, line_number + 1, e);
+                        continue;
+                    }
+                };
+
+                events.push(export_event);
+            }
+        }
+    }
+
+    Ok(events)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -352,6 +472,53 @@ mod tests {
     use std::fs::File;
     use std::io::Write;
     use tempfile::tempdir;
+
+    #[test]
+    fn test_parse_export_events_from_directory() {
+        let test_dir = tempdir().unwrap();
+        let test_file = test_dir.path().join("test.json");
+        
+        // Create a test JSON file with export events
+        let test_data = r#"{"$insert_id":"test-1","event_type":"test_event","event_time":"2025-07-01 16:34:54.837000","user_id":"test-user","device_id":"test-device","event_properties":{},"user_properties":{},"groups":{},"group_properties":{},"uuid":"test-uuid-1"}
+{"$insert_id":"test-2","event_type":"test_event_2","event_time":"2025-07-01 16:34:55.837000","user_id":"test-user-2","device_id":"test-device-2","event_properties":{},"user_properties":{},"groups":{},"group_properties":{},"uuid":"test-uuid-2"}"#;
+        
+        let mut file = File::create(&test_file).unwrap();
+        file.write_all(test_data.as_bytes()).unwrap();
+        
+        // Parse the events
+        let events = parse_export_events_from_directory(test_dir.path()).unwrap();
+        
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].insert_id, Some("test-1".to_string()));
+        assert_eq!(events[0].event_type, Some("test_event".to_string()));
+        assert_eq!(events[1].insert_id, Some("test-2".to_string()));
+        assert_eq!(events[1].event_type, Some("test_event_2".to_string()));
+    }
+
+    #[test]
+    fn test_export_event_conversion_to_batch_event() {
+        let export_event = ExportEvent {
+            insert_id: Some("test-insert-id".to_string()),
+            event_type: Some("test_event".to_string()),
+            event_time: Some(DateTime::parse_from_str("2025-07-01 16:34:54.837000 +0000", "%Y-%m-%d %H:%M:%S%.6f %z").unwrap().with_timezone(&Utc)),
+            user_id: Some("test-user".to_string()),
+            device_id: Some("test-device".to_string()),
+            event_properties: Some(std::collections::HashMap::new()),
+            user_properties: Some(std::collections::HashMap::new()),
+            groups: Some(std::collections::HashMap::new()),
+            group_properties: Some(std::collections::HashMap::new()),
+            uuid: Some("test-uuid".to_string()),
+            ..Default::default()
+        };
+        
+        let batch_event = export_event.to_batch_event().unwrap();
+        
+        assert_eq!(batch_event.insert_id, Some("test-insert-id".to_string()));
+        assert_eq!(batch_event.event_type, "test_event");
+        assert_eq!(batch_event.user_id, Some("test-user".to_string()));
+        assert_eq!(batch_event.device_id, Some("test-device".to_string()));
+        assert_eq!(batch_event.skip_user_properties_sync, Some(true));
+    }
 
     #[test]
     fn test_end_to_end_multiple_files_and_rows() {
