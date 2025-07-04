@@ -1,5 +1,5 @@
 use crate::amplitude_types::{BatchUploadRequest, BatchUploadResponse, Event};
-use crate::config::AmplitudeConfig;
+use crate::config::AmplitudeProjectSecrets;
 use chrono::{DateTime, Utc};
 use reqwest::StatusCode;
 use std::error::Error;
@@ -17,42 +17,25 @@ pub struct AmplitudeClient {
     endpoint: String,
     export_endpoint: String,
     secret_key: String,
-    transfer_project_api_key: Option<String>,
-    transfer_project_secret_key: Option<String>,
     client: reqwest::Client,
 }
 
 impl AmplitudeClient {
-    /// Create a new AmplitudeClient with the given API key and optional endpoint.
-    pub fn new<S: Into<String>>(api_key: S, endpoint: Option<String>) -> Self {
-        AmplitudeClient {
-            api_key: api_key.into(),
-            endpoint: endpoint.unwrap_or_else(|| DEFAULT_ENDPOINT.to_string()),
-            export_endpoint: DEFAULT_EXPORT_ENDPOINT.to_string(),
-            secret_key: String::new(), // Will be loaded from config when needed
-            transfer_project_api_key: None,
-            transfer_project_secret_key: None,
-            client: reqwest::Client::new(),
-        }
-    }
 
-    /// Create a new AmplitudeClient from configuration.
-    pub fn from_config(config: AmplitudeConfig) -> Self {
+    /// Create a new AmplitudeClient from project configuration.
+    pub fn from_project_config(project_config: &AmplitudeProjectSecrets) -> Self {
         AmplitudeClient {
-            api_key: config.api_key,
-            endpoint: config.endpoint,
-            export_endpoint: config.export_endpoint,
-            secret_key: config.secret_key,
-            transfer_project_api_key: config.transfer_project_api_key,
-            transfer_project_secret_key: config.transfer_project_secret_key,
+            api_key: project_config.api_key.clone(),
+            endpoint: "https://api2.amplitude.com/batch".to_string(),
+            export_endpoint: "https://amplitude.com/api/2/export".to_string(),
+            secret_key: project_config.secret_key.clone(),
             client: reqwest::Client::new(),
         }
     }
 
     /// Upload a batch of events to Amplitude.
     /// 
-    /// This method requires transfer project API credentials to be configured.
-    /// The transfer_project_api_key must be set in the configuration file.
+    /// This method uses the project's API key and secret key for authentication.
     ///
     /// # Example
     /// ```no_run
@@ -103,12 +86,8 @@ impl AmplitudeClient {
     /// # });
     /// ```
     pub async fn send_events(&self, events: Vec<Event>) -> Result<BatchUploadResponse, Box<dyn Error>> {
-        // Require transfer project API key for batch uploads
-        let api_key = self.transfer_project_api_key.as_ref()
-            .ok_or("Transfer project API key is required for batch uploads. Please configure transfer_project_api_key in your config file.")?;
-        
         let req_body = BatchUploadRequest {
-            api_key: api_key.clone(),
+            api_key: self.api_key.clone(),
             events,
             options: None,
         };

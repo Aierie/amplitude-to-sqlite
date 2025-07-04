@@ -1,6 +1,6 @@
 use crate::amplitude_sdk::AmplitudeClient;
 use crate::amplitude_types::ExportEvent;
-use crate::config::AmplitudeConfig;
+use crate::project_selector::ProjectSelector;
 use chrono::{DateTime, Utc};
 use flate2::read::GzDecoder;
 use rusqlite::{params, Connection, Result};
@@ -23,13 +23,18 @@ pub struct ParsedItem {
     pub session_id: Option<u64>,
 }
 
-/// Export events from Amplitude for a given date range
-pub async fn export_amplitude_data(
+/// Export events from Amplitude for a given date range with project selection
+pub async fn export_amplitude_data_with_project(
     start_date: &str,
     end_date: &str,
     output_dir: &std::path::Path,
+    project_name: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    println!("Exporting Amplitude data from {} to {}", start_date, end_date);
+    // Select project
+    let selector = ProjectSelector::new()?;
+    let project_config = selector.select_project(project_name)?;
+    
+    println!("Using project configuration");
     
     // Parse dates
     let start = DateTime::parse_from_rfc3339(&format!("{}T00:00:00Z", start_date))?.with_timezone(&Utc);
@@ -45,9 +50,8 @@ pub async fn export_amplitude_data(
     // Create output directory
     fs::create_dir_all(output_dir)?;
     
-    // Load configuration and create client
-    let config = AmplitudeConfig::load()?;
-    let client = AmplitudeClient::from_config(config);
+    // Create client with selected project config
+    let client = AmplitudeClient::from_project_config(project_config);
     let export_data = client.export_events(start, end).await?;
     
     // Save the zip file
@@ -353,16 +357,20 @@ fn write_parsed_items_to_sqlite<P: AsRef<Path>>(
     Ok(())
 }
 
-/// Process JSON files containing ExportEvents, convert them to Events, order by time, and upload via batch API
-pub async fn process_and_upload_events(
+/// Process JSON files and upload events via batch API with project selection
+pub async fn process_and_upload_events_with_project(
     input_dir: &std::path::Path,
     batch_size: usize,
+    project_name: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    println!("Processing JSON files from {:?} with batch size {}", input_dir, batch_size);
+    // Select project
+    let selector = ProjectSelector::new()?;
+    let project_config = selector.select_project(project_name)?;
     
-    // Load configuration and create client
-    let config = AmplitudeConfig::load()?;
-    let client = AmplitudeClient::from_config(config);
+    println!("Using project configuration");
+    
+    // Create client with selected project config
+    let client = AmplitudeClient::from_project_config(project_config);
     
     // Parse all ExportEvents from JSON files
     let export_events = parse_export_events_from_directory(input_dir)?;

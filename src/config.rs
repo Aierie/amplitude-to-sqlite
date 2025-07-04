@@ -1,36 +1,27 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::collections::HashMap;
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct AmplitudeConfig {
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct AmplitudeProjectSecrets {
     pub api_key: String,
     pub secret_key: String,
-    #[serde(default = "default_endpoint")]
-    pub endpoint: String,
-    #[serde(default = "default_export_endpoint")]
-    pub export_endpoint: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MultiProjectConfig {
     #[serde(default)]
-    pub transfer_project_api_key: Option<String>,
-    #[serde(default)]
-    pub transfer_project_secret_key: Option<String>,
+    pub projects: HashMap<String, AmplitudeProjectSecrets>,
 }
 
-fn default_endpoint() -> String {
-    "https://api2.amplitude.com/batch".to_string()
-}
-
-fn default_export_endpoint() -> String {
-    "https://amplitude.com/api/2/export".to_string()
-}
-
-impl AmplitudeConfig {
+impl MultiProjectConfig {
     /// Load configuration from a file
     pub fn from_file(path: &PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
         let settings = config::Config::builder()
             .add_source(config::File::from(path.as_path()))
             .build()?;
         
-        let config: AmplitudeConfig = settings.try_deserialize()?;
+        let config: MultiProjectConfig = settings.try_deserialize()?;
         Ok(config)
     }
 
@@ -53,31 +44,45 @@ impl AmplitudeConfig {
             }
         }
 
-        // Fall back to environment variables
+        // Fall back to environment variables (legacy support)
         let api_key = std::env::var("AMPLITUDE_PROJECT_API_KEY")
             .map_err(|_| "No config file found and AMPLITUDE_PROJECT_API_KEY environment variable not set")?;
         let secret_key = std::env::var("AMPLITUDE_PROJECT_SECRET_KEY")
             .map_err(|_| "No config file found and AMPLITUDE_PROJECT_SECRET_KEY environment variable not set")?;
 
-        Ok(AmplitudeConfig {
+        let mut projects = HashMap::new();
+        projects.insert("default".to_string(), AmplitudeProjectSecrets {
             api_key,
             secret_key,
-            endpoint: default_endpoint(),
-            export_endpoint: default_export_endpoint(),
-            transfer_project_api_key: None,
-            transfer_project_secret_key: None,
+        });
+
+        Ok(MultiProjectConfig {
+            projects,
         })
+    }
+
+    /// Get a specific project configuration
+    pub fn get_project(&self, project_name: &str) -> Option<&AmplitudeProjectSecrets> {
+        self.projects.get(project_name)
+    }
+
+    /// List all available project names
+    pub fn list_projects(&self) -> Vec<&String> {
+        self.projects.keys().collect()
     }
 
     /// Create a sample configuration file
     pub fn create_sample_config(path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
-        let sample_config = AmplitudeConfig {
+        let mut projects = HashMap::new();
+        
+        // Add sample project
+        projects.insert("my_project".to_string(), AmplitudeProjectSecrets {
             api_key: "your_amplitude_project_api_key_here".to_string(),
             secret_key: "your_amplitude_project_secret_key_here".to_string(),
-            endpoint: default_endpoint(),
-            export_endpoint: default_export_endpoint(),
-            transfer_project_api_key: Some("your_transfer_project_api_key_here".to_string()),
-            transfer_project_secret_key: Some("your_transfer_project_secret_key_here".to_string()),
+        });
+
+        let sample_config = MultiProjectConfig {
+            projects,
         };
 
         // Create parent directory if it doesn't exist
@@ -97,8 +102,32 @@ impl AmplitudeConfig {
 
         println!("Sample configuration file created at: {:?}", path);
         println!("Please edit the file and add your actual Amplitude API credentials.");
-        println!("Note: transfer_project_api_key and transfer_project_secret_key are required for batch upload operations.");
+        println!("You can add multiple projects by adding more entries to the 'projects' section.");
         
         Ok(())
+    }
+}
+
+// Legacy compatibility - keep the old AmplitudeProjectSecrets methods for backward compatibility
+impl AmplitudeProjectSecrets {
+    /// Load configuration from a file (legacy method)
+    pub fn from_file(path: &PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
+        let multi_config = MultiProjectConfig::from_file(path)?;
+        multi_config.projects.values().next()
+            .cloned()
+            .ok_or_else(|| "No projects found in configuration".into())
+    }
+
+    /// Load configuration from default locations (legacy method)
+    pub fn load() -> Result<Self, Box<dyn std::error::Error>> {
+        let multi_config = MultiProjectConfig::load()?;
+        multi_config.projects.values().next()
+            .cloned()
+            .ok_or_else(|| "No projects found in configuration".into())
+    }
+
+    /// Create a sample configuration file (legacy method)
+    pub fn create_sample_config(path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+        MultiProjectConfig::create_sample_config(path)
     }
 } 

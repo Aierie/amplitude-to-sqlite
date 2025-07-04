@@ -6,6 +6,7 @@ mod amplitude_sdk;
 mod converter;
 mod config;
 mod verifier;
+mod project_selector;
 
 #[derive(Parser)]
 #[command(name = "amplitude-cli")]
@@ -31,6 +32,10 @@ enum Commands {
         /// Output directory for exported files
         #[arg(long, default_value = "./export")]
         output_dir: PathBuf,
+
+        /// Project name to use (if not specified, will prompt for selection)
+        #[arg(long)]
+        project: Option<String>,
     },
     
     /// Convert exported Amplitude JSON files to SQLite database
@@ -67,7 +72,27 @@ enum Commands {
         /// Batch size for uploads (default: 1000)
         #[arg(long, default_value = "1000")]
         batch_size: usize,
+
+        /// Project name to use (if not specified, will prompt for selection)
+        #[arg(long)]
+        project: Option<String>,
     },
+
+    /// Manage projects in configuration
+    Projects {
+        #[command(subcommand)]
+        subcommand: ProjectCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum ProjectCommands {
+    /// List all configured projects
+    List,
+    
+    // TODO: I have not checked this manually
+    /// Add a new project interactively
+    Add,
 }
 
 #[tokio::main]
@@ -75,22 +100,44 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
     match &cli.command {
-        Commands::Export { start_date, end_date, output_dir } => {
-            converter::export_amplitude_data(start_date, end_date, output_dir).await?;
+        Commands::Export { start_date, end_date, output_dir, project } => {
+            converter::export_amplitude_data_with_project(start_date, end_date, output_dir, project.as_deref()).await?;
         }
         Commands::Convert { input_dir, output_db } => {
             converter::convert_json_to_sqlite(input_dir, output_db)?;
         }
         Commands::Init { config_path } => {
-            config::AmplitudeConfig::create_sample_config(config_path)?;
+            config::MultiProjectConfig::create_sample_config(config_path)?;
         }
         Commands::VerifyDeserialization { input_dir } => {
             println!("Verifying JSON files in: {}", input_dir.display());
             let results = verifier::verify_directory(input_dir)?;
             verifier::print_verification_summary(&results);
         }
-        Commands::Upload { input_dir, batch_size } => {
-            converter::process_and_upload_events(input_dir, *batch_size).await?;
+        Commands::Upload { input_dir, batch_size, project } => {
+            converter::process_and_upload_events_with_project(input_dir, *batch_size, project.as_deref()).await?;
+        }
+        Commands::Projects { subcommand } => {
+            match subcommand {
+                ProjectCommands::List => {
+                    let selector = project_selector::ProjectSelector::new()?;
+                    let projects = selector.list_projects();
+                    
+                    if projects.is_empty() {
+                        println!("No projects configured.");
+                    } else {
+                        println!("Configured projects:");
+                        for project_name in projects {
+                            println!("  {}", project_name);
+                        }
+                    }
+                }
+                ProjectCommands::Add => {
+                    let mut selector = project_selector::ProjectSelector::new()?;
+                    selector.add_project_interactive()?;
+                    selector.save_config(None)?;
+                }
+            }
         }
     }
 
