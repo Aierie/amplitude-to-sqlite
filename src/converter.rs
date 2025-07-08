@@ -428,15 +428,23 @@ pub async fn process_and_upload_events_with_project(
     Ok(())
 }
 
-/// Parse all ExportEvents from JSON files in a directory
+/// Parse all ExportEvents from JSON files in a directory (recursively)
 fn parse_export_events_from_directory(dir: &Path) -> io::Result<Vec<ExportEvent>> {
     let mut events = Vec::new();
+    parse_export_events_recursive(dir, &mut events)?;
+    Ok(events)
+}
 
+/// Recursively parse ExportEvents from JSON files in a directory tree
+fn parse_export_events_recursive(dir: &Path, events: &mut Vec<ExportEvent>) -> io::Result<()> {
     for entry in fs::read_dir(dir)? {
         let entry = entry?;
         let path = entry.path();
 
-        if path.is_file() {
+        if path.is_dir() {
+            // Recursively process subdirectories
+            parse_export_events_recursive(&path, events)?;
+        } else if path.is_file() {
             let file_name = path.file_name().unwrap().to_string_lossy().to_string();
             
             // Check if it's a JSON file
@@ -470,7 +478,436 @@ fn parse_export_events_from_directory(dir: &Path) -> io::Result<Vec<ExportEvent>
         }
     }
 
-    Ok(events)
+    Ok(())
+}
+
+/// End-to-end round-trip: export from one project and upload to another
+pub async fn round_trip_e2e(
+    start_date: &str,
+    end_date: &str,
+    output_dir: &std::path::Path,
+    export_from: Option<&str>,
+    upload_to: Option<&str>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Load project selector
+    let selector = ProjectSelector::new()?;
+    
+    println!("Select project to export from");
+    // Select export project
+    let export_project = selector.select_project(export_from)?;
+    
+    // Get export project name
+    let export_project_name = if let Some(name) = export_from {
+        name
+    } else {
+        // Find the name of the selected project
+        let mut found_name = "unknown";
+        for (name, config) in &selector.config.projects {
+            if std::ptr::eq(config, export_project) {
+                found_name = name;
+                break;
+            }
+        }
+        found_name
+    };
+
+    println!("Exporting from: {}", export_project_name);
+    
+    // Select upload project (must be different from export project)
+    let upload_project_name = if let Some(upload_name) = upload_to {
+        if upload_name == export_project_name {
+            return Err("Export and upload projects must be different".into());
+        }
+        let _upload_project = selector.select_project(Some(upload_name))?;
+        upload_name
+    } else {
+        // Interactive selection - ensure it's different from export project
+        let projects: Vec<&String> = selector.config.list_projects();
+        let available_projects: Vec<&String> = projects
+            .iter()
+            .filter(|&&name| name != export_project_name)
+            .copied()
+            .collect();
+        
+        if available_projects.is_empty() {
+            return Err("No other projects available for upload. You need at least 2 projects configured.".into());
+        }
+        
+        println!("Available projects for upload (excluding '{}'):", export_project_name);
+        for (i, project_name) in available_projects.iter().enumerate() {
+            println!("  {}. {}", i + 1, project_name);
+        }
+        
+        let selection = dialoguer::Select::new()
+            .with_prompt("Select project to upload to")
+            .items(&available_projects)
+            .default(0)
+            .interact()?;
+        
+        available_projects[selection]
+    };
+    
+    // Display the selected options
+    println!("Round-trip E2E configuration:");
+    println!("  Export from: {}", export_project_name);
+    println!("  Upload to: {}", upload_project_name);
+    println!("  Date range: {} to {}", start_date, end_date);
+    println!("  Output directory: {}", output_dir.display());
+    
+    // Perform the export from the export_from project
+    println!("\nStarting export from project: {}", export_project_name);
+    let original_export_dir = output_dir.join("original");
+    export_amplitude_data_with_project(start_date, end_date, &original_export_dir, Some(export_project_name)).await?;
+    println!("Export completed successfully!");
+    
+    // Perform the upload to the upload_to project
+    println!("\nStarting upload to project: {}", upload_project_name);
+    process_and_upload_events_with_project(&original_export_dir, 1000, Some(upload_project_name)).await?;
+    println!("Upload completed successfully!");
+    
+    // Export from the upload_to project to a different directory for comparison
+    let comparison_dir = output_dir.join("comparison");
+    println!("\nStarting export from upload_to project for comparison: {}", upload_project_name);
+    export_amplitude_data_with_project(start_date, end_date, &comparison_dir, Some(upload_project_name)).await?;
+    println!("Comparison export completed successfully!");
+    
+    // Display final summary
+    println!("\nRound-trip E2E completed successfully!");
+    println!("  Exported from: {}", export_project_name);
+    println!("  Uploaded to: {}", upload_project_name);
+    println!("  Date range: {} to {}", start_date, end_date);
+    println!("  Original export directory: {}", original_export_dir.display());
+    println!("  Comparison export directory: {}", comparison_dir.display());
+    
+    Ok(())
+}
+
+/// Compare export events between original and comparison directories
+/// Creates a diff report keyed by insert_id and writes it to the filesystem
+pub fn compare_export_events(
+    original_dir: &std::path::Path,
+    comparison_dir: &std::path::Path,
+    output_dir: &std::path::Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    println!("Comparing export events between:");
+    println!("  Original: {:?}", original_dir);
+    println!("  Comparison: {:?}", comparison_dir);
+    println!("  Output: {:?}", output_dir);
+    
+    // Create output directory if it doesn't exist
+    fs::create_dir_all(output_dir)?;
+    
+    // Parse events from both directories
+    println!("Parsing events from original directory...");
+    let original_events = parse_export_events_from_directory(original_dir)?;
+    println!("Found {} events in original directory", original_events.len());
+    
+    println!("Parsing events from comparison directory...");
+    let comparison_events = parse_export_events_from_directory(comparison_dir)?;
+    println!("Found {} events in comparison directory", comparison_events.len());
+    
+    // Create maps keyed by insert_id for efficient lookup
+    let mut original_map: std::collections::HashMap<String, ExportEvent> = std::collections::HashMap::new();
+    let mut comparison_map: std::collections::HashMap<String, ExportEvent> = std::collections::HashMap::new();
+    
+    for event in original_events {
+        if let Some(insert_id) = &event.insert_id {
+            original_map.insert(insert_id.clone(), event);
+        }
+    }
+    
+    for event in comparison_events {
+        if let Some(insert_id) = &event.insert_id {
+            comparison_map.insert(insert_id.clone(), event);
+        }
+    }
+    
+    println!("Created maps with {} original and {} comparison events", original_map.len(), comparison_map.len());
+    
+    // Find differences
+    let mut only_in_original = Vec::new();
+    let mut only_in_comparison = Vec::new();
+    let mut different_events = Vec::new();
+    let mut identical_events = Vec::new();
+    
+    // Check for events only in original
+    for (insert_id, original_event) in &original_map {
+        match comparison_map.get(insert_id) {
+            Some(comparison_event) => {
+                if events_are_identical(original_event, comparison_event) {
+                    identical_events.push(insert_id.clone());
+                } else {
+                    different_events.push((insert_id.clone(), original_event.clone(), comparison_event.clone()));
+                }
+            }
+            None => {
+                only_in_original.push((insert_id.clone(), original_event.clone()));
+            }
+        }
+    }
+    
+    // Check for events only in comparison
+    for (insert_id, comparison_event) in &comparison_map {
+        if !original_map.contains_key(insert_id) {
+            only_in_comparison.push((insert_id.clone(), comparison_event.clone()));
+        }
+    }
+    
+    // Collect IDs for summary before moving the data
+    let different_event_ids: Vec<String> = different_events.iter().map(|(id, _, _)| id.clone()).collect();
+    let only_original_ids: Vec<String> = only_in_original.iter().map(|(id, _)| id.clone()).collect();
+    let only_comparison_ids: Vec<String> = only_in_comparison.iter().map(|(id, _)| id.clone()).collect();
+    
+    // Clone the vectors to avoid borrow checker issues
+    let different_events_clone = different_events.clone();
+    let only_in_original_clone = only_in_original.clone();
+    let only_in_comparison_clone = only_in_comparison.clone();
+    
+    // Write summary report
+    let summary_path = output_dir.join("comparison_summary.json");
+    let summary = serde_json::json!({
+        "summary": {
+            "total_original_events": original_map.len(),
+            "total_comparison_events": comparison_map.len(),
+            "identical_events": identical_events.len(),
+            "different_events": different_events.len(),
+            "only_in_original": only_in_original.len(),
+            "only_in_comparison": only_in_comparison.len()
+        },
+        "identical_events": identical_events,
+        "different_events": different_event_ids,
+        "only_in_original": only_original_ids,
+        "only_in_comparison": only_comparison_ids
+    });
+    
+    let summary_file = File::create(&summary_path)?;
+    serde_json::to_writer_pretty(summary_file, &summary)?;
+    println!("Summary written to: {:?}", summary_path);
+    
+    // Write detailed diff for different events
+    if !different_events_clone.is_empty() {
+        let diff_dir = output_dir.join("differences");
+        fs::create_dir_all(&diff_dir)?;
+        
+        for (insert_id, original_event, comparison_event) in different_events_clone {
+            let diff_path = diff_dir.join(format!("{}.json", sanitize_filename(&insert_id)));
+            let diff_file = File::create(&diff_path)?;
+            
+            let diff_data = serde_json::json!({
+                "insert_id": insert_id,
+                "original_event": original_event,
+                "comparison_event": comparison_event,
+                "differences": find_event_differences(&original_event, &comparison_event)
+            });
+            
+            serde_json::to_writer_pretty(diff_file, &diff_data)?;
+        }
+        
+        println!("Detailed differences written to: {:?}", diff_dir);
+    }
+    
+    // Write events only in original
+    if !only_in_original_clone.is_empty() {
+        let only_original_dir = output_dir.join("only_in_original");
+        fs::create_dir_all(&only_original_dir)?;
+        
+        for (insert_id, event) in only_in_original_clone {
+            let event_path = only_original_dir.join(format!("{}.json", sanitize_filename(&insert_id)));
+            let event_file = File::create(&event_path)?;
+            serde_json::to_writer_pretty(event_file, &event)?;
+        }
+        
+        println!("Events only in original written to: {:?}", only_original_dir);
+    }
+    
+    // Write events only in comparison
+    if !only_in_comparison_clone.is_empty() {
+        let only_comparison_dir = output_dir.join("only_in_comparison");
+        fs::create_dir_all(&only_comparison_dir)?;
+        
+        for (insert_id, event) in only_in_comparison_clone {
+            let event_path = only_comparison_dir.join(format!("{}.json", sanitize_filename(&insert_id)));
+            let event_file = File::create(&event_path)?;
+            serde_json::to_writer_pretty(event_file, &event)?;
+        }
+        
+        println!("Events only in comparison written to: {:?}", only_comparison_dir);
+    }
+    
+    // Print final summary
+    println!("\nComparison completed!");
+    println!("  Identical events: {}", identical_events.len());
+    println!("  Different events: {}", different_events.len());
+    println!("  Only in original: {}", only_in_original.len());
+    println!("  Only in comparison: {}", only_in_comparison.len());
+    
+    Ok(())
+}
+
+/// Check if two ExportEvents are identical
+fn events_are_identical(event1: &ExportEvent, event2: &ExportEvent) -> bool {
+    // Compare key fields that should be identical
+    event1.insert_id == event2.insert_id &&
+    event1.event_type == event2.event_type &&
+    event1.user_id == event2.user_id &&
+    event1.device_id == event2.device_id &&
+    event1.event_time == event2.event_time &&
+    event1.event_properties == event2.event_properties &&
+    event1.user_properties == event2.user_properties &&
+    event1.groups == event2.groups &&
+    event1.group_properties == event2.group_properties
+}
+
+/// Find differences between two ExportEvents
+fn find_event_differences(event1: &ExportEvent, event2: &ExportEvent) -> serde_json::Value {
+    let mut differences = serde_json::Map::new();
+    
+    // Compare each field individually to handle different types
+    if event1.insert_id != event2.insert_id {
+        differences.insert("insert_id".to_string(), serde_json::json!({
+            "original": event1.insert_id,
+            "comparison": event2.insert_id
+        }));
+    }
+    
+    if event1.event_type != event2.event_type {
+        differences.insert("event_type".to_string(), serde_json::json!({
+            "original": event1.event_type,
+            "comparison": event2.event_type
+        }));
+    }
+    
+    if event1.user_id != event2.user_id {
+        differences.insert("user_id".to_string(), serde_json::json!({
+            "original": event1.user_id,
+            "comparison": event2.user_id
+        }));
+    }
+    
+    if event1.device_id != event2.device_id {
+        differences.insert("device_id".to_string(), serde_json::json!({
+            "original": event1.device_id,
+            "comparison": event2.device_id
+        }));
+    }
+    
+    if event1.event_time != event2.event_time {
+        differences.insert("event_time".to_string(), serde_json::json!({
+            "original": event1.event_time,
+            "comparison": event2.event_time
+        }));
+    }
+    
+    if event1.event_properties != event2.event_properties {
+        differences.insert("event_properties".to_string(), serde_json::json!({
+            "original": event1.event_properties,
+            "comparison": event2.event_properties
+        }));
+    }
+    
+    if event1.user_properties != event2.user_properties {
+        differences.insert("user_properties".to_string(), serde_json::json!({
+            "original": event1.user_properties,
+            "comparison": event2.user_properties
+        }));
+    }
+    
+    if event1.groups != event2.groups {
+        differences.insert("groups".to_string(), serde_json::json!({
+            "original": event1.groups,
+            "comparison": event2.groups
+        }));
+    }
+    
+    if event1.group_properties != event2.group_properties {
+        differences.insert("group_properties".to_string(), serde_json::json!({
+            "original": event1.group_properties,
+            "comparison": event2.group_properties
+        }));
+    }
+    
+    if event1.uuid != event2.uuid {
+        differences.insert("uuid".to_string(), serde_json::json!({
+            "original": event1.uuid,
+            "comparison": event2.uuid
+        }));
+    }
+    
+    if event1.session_id != event2.session_id {
+        differences.insert("session_id".to_string(), serde_json::json!({
+            "original": event1.session_id,
+            "comparison": event2.session_id
+        }));
+    }
+    
+    if event1.app != event2.app {
+        differences.insert("app".to_string(), serde_json::json!({
+            "original": event1.app,
+            "comparison": event2.app
+        }));
+    }
+    
+    if event1.amplitude_id != event2.amplitude_id {
+        differences.insert("amplitude_id".to_string(), serde_json::json!({
+            "original": event1.amplitude_id,
+            "comparison": event2.amplitude_id
+        }));
+    }
+    
+    if event1.event_id != event2.event_id {
+        differences.insert("event_id".to_string(), serde_json::json!({
+            "original": event1.event_id,
+            "comparison": event2.event_id
+        }));
+    }
+    
+    if event1.client_event_time != event2.client_event_time {
+        differences.insert("client_event_time".to_string(), serde_json::json!({
+            "original": event1.client_event_time,
+            "comparison": event2.client_event_time
+        }));
+    }
+    
+    if event1.client_upload_time != event2.client_upload_time {
+        differences.insert("client_upload_time".to_string(), serde_json::json!({
+            "original": event1.client_upload_time,
+            "comparison": event2.client_upload_time
+        }));
+    }
+    
+    if event1.server_received_time != event2.server_received_time {
+        differences.insert("server_received_time".to_string(), serde_json::json!({
+            "original": event1.server_received_time,
+            "comparison": event2.server_received_time
+        }));
+    }
+    
+    if event1.server_upload_time != event2.server_upload_time {
+        differences.insert("server_upload_time".to_string(), serde_json::json!({
+            "original": event1.server_upload_time,
+            "comparison": event2.server_upload_time
+        }));
+    }
+    
+    if event1.processed_time != event2.processed_time {
+        differences.insert("processed_time".to_string(), serde_json::json!({
+            "original": event1.processed_time,
+            "comparison": event2.processed_time
+        }));
+    }
+    
+    serde_json::Value::Object(differences)
+}
+
+/// Sanitize filename to be filesystem-safe
+fn sanitize_filename(filename: &str) -> String {
+    filename
+        .chars()
+        .map(|c| match c {
+            'a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '_' => c,
+            _ => '_',
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -501,6 +938,40 @@ mod tests {
         assert_eq!(events[0].event_type, Some("test_event".to_string()));
         assert_eq!(events[1].insert_id, Some("test-2".to_string()));
         assert_eq!(events[1].event_type, Some("test_event_2".to_string()));
+    }
+
+    #[test]
+    fn test_parse_export_events_from_directory_recursive() {
+        let test_dir = tempdir().unwrap();
+        
+        // Create a subdirectory
+        let subdir = test_dir.path().join("subdir");
+        fs::create_dir(&subdir).unwrap();
+        
+        // Create JSON files in both root and subdirectory
+        let root_file = test_dir.path().join("root.json");
+        let subdir_file = subdir.join("subdir.json");
+        
+        let root_data = r#"{"$insert_id":"root-1","event_type":"root_event","event_time":"2025-07-01 16:34:54.837000","user_id":"root-user","device_id":"root-device","event_properties":{},"user_properties":{},"groups":{},"group_properties":{},"uuid":"root-uuid-1"}"#;
+        let subdir_data = r#"{"$insert_id":"subdir-1","event_type":"subdir_event","event_time":"2025-07-01 16:34:55.837000","user_id":"subdir-user","device_id":"subdir-device","event_properties":{},"user_properties":{},"groups":{},"group_properties":{},"uuid":"subdir-uuid-1"}"#;
+        
+        let mut root_file_handle = File::create(&root_file).unwrap();
+        root_file_handle.write_all(root_data.as_bytes()).unwrap();
+        
+        let mut subdir_file_handle = File::create(&subdir_file).unwrap();
+        subdir_file_handle.write_all(subdir_data.as_bytes()).unwrap();
+        
+        // Parse the events recursively
+        let events = parse_export_events_from_directory(test_dir.path()).unwrap();
+        
+        assert_eq!(events.len(), 2);
+        
+        // Check that both events are found (order may vary)
+        let root_event = events.iter().find(|e| e.insert_id.as_deref() == Some("root-1")).unwrap();
+        let subdir_event = events.iter().find(|e| e.insert_id.as_deref() == Some("subdir-1")).unwrap();
+        
+        assert_eq!(root_event.event_type, Some("root_event".to_string()));
+        assert_eq!(subdir_event.event_type, Some("subdir_event".to_string()));
     }
 
     #[test]

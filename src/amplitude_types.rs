@@ -332,7 +332,7 @@ where
 }
 
 /// Event structure from Amplitude Export API
-#[derive(Debug, Serialize, Deserialize, Default)]
+#[derive(Debug, Serialize, Deserialize, Default, Clone)]
 pub struct ExportEvent {
     #[serde(rename = "$insert_id")]
     pub insert_id: Option<String>,

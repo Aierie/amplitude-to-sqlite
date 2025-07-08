@@ -78,6 +78,44 @@ enum Commands {
         project: Option<String>,
     },
 
+    /// End-to-end round-trip: export from one project and upload to another
+    RoundTripE2E {
+        /// Start date for export (YYYY-MM-DD format)
+        #[arg(long)]
+        start_date: String,
+        
+        /// End date for export (YYYY-MM-DD format)
+        #[arg(long)]
+        end_date: String,
+        
+        /// Output directory for exported files
+        #[arg(long, default_value = "./e2e-test-export")]
+        output_dir: PathBuf,
+
+        /// Project name to export from (if not specified, will prompt for selection)
+        #[arg(long)]
+        export_from: Option<String>,
+
+        /// Project name to upload to (if not specified, will prompt for selection)
+        #[arg(long)]
+        upload_to: Option<String>,
+    },
+
+    /// Compare export events between original and comparison directories
+    Compare {
+        /// Directory containing original export events
+        #[arg(long)]
+        original_dir: PathBuf,
+        
+        /// Directory containing comparison export events
+        #[arg(long)]
+        comparison_dir: PathBuf,
+        
+        /// Output directory for comparison results
+        #[arg(long, default_value = "./comparison-results")]
+        output_dir: PathBuf,
+    },
+
     /// Manage projects in configuration
     Projects {
         #[command(subcommand)]
@@ -116,6 +154,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Commands::Upload { input_dir, batch_size, project } => {
             converter::process_and_upload_events_with_project(input_dir, *batch_size, project.as_deref()).await?;
+        }
+        Commands::RoundTripE2E { start_date, end_date, output_dir, export_from, upload_to } => {
+            converter::round_trip_e2e(start_date, end_date, output_dir, export_from.as_deref(), upload_to.as_deref()).await?;
+        }
+        Commands::Compare { original_dir, comparison_dir, output_dir } => {
+            converter::compare_export_events(original_dir, comparison_dir, output_dir)?;
         }
         Commands::Projects { subcommand } => {
             match subcommand {
