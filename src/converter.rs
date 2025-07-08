@@ -899,6 +899,101 @@ fn find_event_differences(event1: &ExportEvent, event2: &ExportEvent) -> serde_j
     serde_json::Value::Object(differences)
 }
 
+/// Check for duplicate insert IDs across events in a directory
+pub fn check_for_duplicate_insert_ids(
+    input_dir: &std::path::Path,
+    output_dir: &std::path::Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    println!("Checking for duplicate insert IDs in: {}", input_dir.display());
+    
+    // Create output directory if it doesn't exist
+    fs::create_dir_all(output_dir)?;
+    
+    // Parse all export events from the input directory
+    let events = parse_export_events_from_directory(input_dir)?;
+    println!("Found {} total events", events.len());
+    
+    // Group events by insert_id
+    let mut insert_id_groups: std::collections::HashMap<String, Vec<&ExportEvent>> = std::collections::HashMap::new();
+    
+    for event in &events {
+        if let Some(insert_id) = &event.insert_id {
+            insert_id_groups.entry(insert_id.clone()).or_default().push(event);
+        }
+    }
+    
+    // Find duplicates (insert_ids with more than one event)
+    let duplicates: std::collections::HashMap<String, Vec<&ExportEvent>> = insert_id_groups
+        .into_iter()
+        .filter(|(_, events)| events.len() > 1)
+        .collect();
+    
+    println!("Found {} insert IDs with duplicates", duplicates.len());
+    
+    if duplicates.is_empty() {
+        println!("No duplicate insert IDs found!");
+        return Ok(());
+    }
+    
+    // Create summary file
+    let summary_path = output_dir.join("duplicate_summary.json");
+    let summary = serde_json::json!({
+        "total_events": events.len(),
+        "unique_insert_ids": events.iter().filter(|e| e.insert_id.is_some()).count(),
+        "duplicate_insert_ids_count": duplicates.len(),
+        "duplicate_insert_ids": duplicates.keys().collect::<Vec<_>>(),
+        "duplicate_counts": duplicates.iter().map(|(id, events)| (id, events.len())).collect::<std::collections::HashMap<_, _>>()
+    });
+    
+    let summary_file = File::create(&summary_path)?;
+    serde_json::to_writer_pretty(summary_file, &summary)?;
+    println!("Summary written to: {}", summary_path.display());
+    
+    // Create individual files for each duplicate insert_id
+    for (insert_id, duplicate_events) in &duplicates {
+        let filename = sanitize_filename(insert_id);
+        let file_path = output_dir.join(format!("duplicate_{}.json", filename));
+        
+        let duplicate_data = serde_json::json!({
+            "insert_id": insert_id,
+            "duplicate_count": duplicate_events.len(),
+            "events": duplicate_events.iter().map(|event| {
+                serde_json::to_value(event).unwrap()
+            }).collect::<Vec<_>>()
+        });
+        
+        let file = File::create(&file_path)?;
+        serde_json::to_writer_pretty(file, &duplicate_data)?;
+        println!("Duplicate events for insert_id '{}' written to: {}", insert_id, file_path.display());
+    }
+    
+    // Create a consolidated file with all duplicates
+    let consolidated_path = output_dir.join("all_duplicates.json");
+    let consolidated_data = serde_json::json!({
+        "summary": {
+            "total_events": events.len(),
+            "unique_insert_ids": events.iter().filter(|e| e.insert_id.is_some()).count(),
+            "duplicate_insert_ids_count": duplicates.len()
+        },
+        "duplicates": duplicates.iter().map(|(insert_id, events)| {
+            serde_json::json!({
+                "insert_id": insert_id,
+                "count": events.len(),
+                "events": events.iter().map(|event| {
+                    serde_json::to_value(event).unwrap()
+                }).collect::<Vec<_>>()
+            })
+        }).collect::<Vec<_>>()
+    });
+    
+    let consolidated_file = File::create(&consolidated_path)?;
+    serde_json::to_writer_pretty(consolidated_file, &consolidated_data)?;
+    println!("All duplicates consolidated in: {}", consolidated_path.display());
+    
+    println!("Duplicate checking completed successfully!");
+    Ok(())
+}
+
 /// Sanitize filename to be filesystem-safe
 fn sanitize_filename(filename: &str) -> String {
     filename
@@ -1084,5 +1179,84 @@ mod tests {
         assert_eq!(results[3].1.as_deref(), Some("ghi"));
         assert!(results[3].2.contains("\"data\": {\"path\": \"/\"}"));
         assert!(results[3].3.contains("fixture2"));
+    }
+
+    #[test]
+    fn test_check_for_duplicate_insert_ids() {
+        let test_dir = tempdir().unwrap();
+        let output_dir = tempdir().unwrap();
+        
+        // Create test JSON files with duplicate insert IDs
+        let test_file1 = test_dir.path().join("file1.json");
+        let test_file2 = test_dir.path().join("file2.json");
+        
+        // File 1: Has a duplicate insert_id "dup-1"
+        let test_data1 = r#"{"$insert_id":"dup-1","event_type":"test_event_1","event_time":"2025-07-01 16:34:54.837000","user_id":"user-1","device_id":"device-1","event_properties":{},"user_properties":{},"groups":{},"group_properties":{},"uuid":"uuid-1"}
+{"$insert_id":"unique-1","event_type":"test_event_2","event_time":"2025-07-01 16:34:55.837000","user_id":"user-2","device_id":"device-2","event_properties":{},"user_properties":{},"groups":{},"group_properties":{},"uuid":"uuid-2"}"#;
+        
+        // File 2: Has the same duplicate insert_id "dup-1" and another duplicate "dup-2"
+        let test_data2 = r#"{"$insert_id":"dup-1","event_type":"test_event_3","event_time":"2025-07-01 16:34:56.837000","user_id":"user-3","device_id":"device-3","event_properties":{},"user_properties":{},"groups":{},"group_properties":{},"uuid":"uuid-3"}
+{"$insert_id":"dup-2","event_type":"test_event_4","event_time":"2025-07-01 16:34:57.837000","user_id":"user-4","device_id":"device-4","event_properties":{},"user_properties":{},"groups":{},"group_properties":{},"uuid":"uuid-4"}
+{"$insert_id":"dup-2","event_type":"test_event_5","event_time":"2025-07-01 16:34:58.837000","user_id":"user-5","device_id":"device-5","event_properties":{},"user_properties":{},"groups":{},"group_properties":{},"uuid":"uuid-5"}"#;
+        
+        let mut file1 = File::create(&test_file1).unwrap();
+        file1.write_all(test_data1.as_bytes()).unwrap();
+        
+        let mut file2 = File::create(&test_file2).unwrap();
+        file2.write_all(test_data2.as_bytes()).unwrap();
+        
+        // Run the duplicate check
+        check_for_duplicate_insert_ids(test_dir.path(), output_dir.path()).unwrap();
+        
+        // Verify the summary file was created
+        let summary_path = output_dir.path().join("duplicate_summary.json");
+        assert!(summary_path.exists());
+        
+        // Read and verify summary content
+        let summary_content = fs::read_to_string(&summary_path).unwrap();
+        let summary: serde_json::Value = serde_json::from_str(&summary_content).unwrap();
+        
+        assert_eq!(summary["total_events"], 5);
+        assert_eq!(summary["duplicate_insert_ids_count"], 2);
+        
+        let duplicate_ids = summary["duplicate_insert_ids"].as_array().unwrap();
+        assert_eq!(duplicate_ids.len(), 2);
+        assert!(duplicate_ids.contains(&serde_json::json!("dup-1")));
+        assert!(duplicate_ids.contains(&serde_json::json!("dup-2")));
+        
+        let duplicate_counts = summary["duplicate_counts"].as_object().unwrap();
+        assert_eq!(duplicate_counts["dup-1"], 2);
+        assert_eq!(duplicate_counts["dup-2"], 2);
+        
+        // Verify individual duplicate files were created
+        let dup1_file = output_dir.path().join("duplicate_dup-1.json");
+        let dup2_file = output_dir.path().join("duplicate_dup-2.json");
+        
+        assert!(dup1_file.exists());
+        assert!(dup2_file.exists());
+        
+        // Verify consolidated file was created
+        let consolidated_file = output_dir.path().join("all_duplicates.json");
+        assert!(consolidated_file.exists());
+        
+        // Read and verify consolidated content
+        let consolidated_content = fs::read_to_string(&consolidated_file).unwrap();
+        let consolidated: serde_json::Value = serde_json::from_str(&consolidated_content).unwrap();
+        
+        assert_eq!(consolidated["summary"]["total_events"], 5);
+        assert_eq!(consolidated["summary"]["duplicate_insert_ids_count"], 2);
+        
+        let duplicates = consolidated["duplicates"].as_array().unwrap();
+        assert_eq!(duplicates.len(), 2);
+        
+        // Check that dup-1 has 2 events
+        let dup1_data = duplicates.iter().find(|d| d["insert_id"] == "dup-1").unwrap();
+        assert_eq!(dup1_data["count"], 2);
+        assert_eq!(dup1_data["events"].as_array().unwrap().len(), 2);
+        
+        // Check that dup-2 has 2 events
+        let dup2_data = duplicates.iter().find(|d| d["insert_id"] == "dup-2").unwrap();
+        assert_eq!(dup2_data["count"], 2);
+        assert_eq!(dup2_data["events"].as_array().unwrap().len(), 2);
     }
 } 

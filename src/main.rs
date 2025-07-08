@@ -116,6 +116,17 @@ enum Commands {
         output_dir: PathBuf,
     },
 
+    /// Check for duplicate insert IDs across events in a directory
+    CheckForDuplicates {
+        /// Input directory containing exported JSON files
+        #[arg(long)]
+        input_dir: PathBuf,
+        
+        /// Output directory for duplicate event files
+        #[arg(long, default_value = "./duplicate-results")]
+        output_dir: PathBuf,
+    },
+
     /// Manage projects in configuration
     Projects {
         #[command(subcommand)]
@@ -160,6 +171,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Commands::Compare { original_dir, comparison_dir, output_dir } => {
             converter::compare_export_events(original_dir, comparison_dir, output_dir)?;
+        }
+        Commands::CheckForDuplicates { input_dir, output_dir } => {
+            converter::check_for_duplicate_insert_ids(input_dir, output_dir)?;
         }
         Commands::Projects { subcommand } => {
             match subcommand {
