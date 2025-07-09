@@ -5,12 +5,6 @@ use reqwest::StatusCode;
 use std::error::Error;
 use std::env;
 
-/// The default Amplitude batch endpoint
-const DEFAULT_ENDPOINT: &str = "https://api2.amplitude.com/batch";
-
-/// The default Amplitude export endpoint
-const DEFAULT_EXPORT_ENDPOINT: &str = "https://amplitude.com/api/2/export";
-
 /// Client for uploading events to Amplitude via the Batch Event Upload API.
 pub struct AmplitudeClient {
     api_key: String,

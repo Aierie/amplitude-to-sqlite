@@ -1,6 +1,5 @@
 use crate::config::{AmplitudeProjectSecrets, MultiProjectConfig};
 use dialoguer::{Select, Input};
-use toml;
 
 pub struct ProjectSelector {
     pub config: MultiProjectConfig,
@@ -62,7 +61,7 @@ impl ProjectSelector {
 
         if self.config.projects.contains_key(&project_name) {
             let overwrite = dialoguer::Confirm::new()
-                .with_prompt(&format!("Project '{}' already exists. Overwrite?", project_name))
+                .with_prompt(format!("Project '{}' already exists. Overwrite?", project_name))
                 .interact()?;
             
             if !overwrite {

@@ -228,7 +228,6 @@ fn parse_json_objects_in_dir(dir: &Path) -> io::Result<Vec<ParsedItem>> {
                             "Missing data/path for server_event",
                         )
                     })?
-                    .to_string()
                     != "/";
                 let event_time: chrono::DateTime<Utc> = json
                     .get("event_time")

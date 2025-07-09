@@ -477,7 +477,7 @@ impl ExportEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json;
+    
 
     #[test]
     fn test_event_serialization() {
@@ -680,7 +680,7 @@ mod tests {
 
             // Deserialize the export event
             let export_event: ExportEvent = serde_json::from_str(&line)
-                .expect(&format!("Failed to deserialize export event: {}", line));
+                .unwrap_or_else(|_| panic!("Failed to deserialize export event: {}", line));
 
             export_events.push(export_event);
         }
@@ -694,13 +694,13 @@ mod tests {
         {
             // Serialize the export event back to JSON
             let round_trip_json = serde_json::to_string(export_event)
-                .expect(&format!("Failed to serialize export event {}", i));
+                .unwrap_or_else(|_| panic!("Failed to serialize export event {}", i));
 
             // Normalize both JSONs for comparison by parsing and re-serializing
             let original_normalized: serde_json::Value = serde_json::from_str(original_line)
-                .expect(&format!("Failed to parse original JSON for event {}", i));
+                .unwrap_or_else(|_| panic!("Failed to parse original JSON for event {}", i));
             let round_trip_normalized: serde_json::Value = serde_json::from_str(&round_trip_json)
-                .expect(&format!("Failed to parse round-trip JSON for event {}", i));
+                .unwrap_or_else(|_| panic!("Failed to parse round-trip JSON for event {}", i));
 
             // Compare the normalized JSONs
             if original_normalized != round_trip_normalized {

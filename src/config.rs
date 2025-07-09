@@ -16,9 +16,9 @@ pub struct MultiProjectConfig {
 
 impl MultiProjectConfig {
     /// Load configuration from a file
-    pub fn from_file(path: &PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn from_file(path: &std::path::Path) -> Result<Self, Box<dyn std::error::Error>> {
         let settings = config::Config::builder()
-            .add_source(config::File::from(path.as_path()))
+            .add_source(config::File::from(path))
             .build()?;
         
         let config: MultiProjectConfig = settings.try_deserialize()?;
@@ -72,7 +72,7 @@ impl MultiProjectConfig {
     }
 
     /// Create a sample configuration file
-    pub fn create_sample_config(path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn create_sample_config(path: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
         let mut projects = HashMap::new();
         
         // Add sample project
@@ -110,24 +110,4 @@ impl MultiProjectConfig {
 
 // Legacy compatibility - keep the old AmplitudeProjectSecrets methods for backward compatibility
 impl AmplitudeProjectSecrets {
-    /// Load configuration from a file (legacy method)
-    pub fn from_file(path: &PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
-        let multi_config = MultiProjectConfig::from_file(path)?;
-        multi_config.projects.values().next()
-            .cloned()
-            .ok_or_else(|| "No projects found in configuration".into())
-    }
-
-    /// Load configuration from default locations (legacy method)
-    pub fn load() -> Result<Self, Box<dyn std::error::Error>> {
-        let multi_config = MultiProjectConfig::load()?;
-        multi_config.projects.values().next()
-            .cloned()
-            .ok_or_else(|| "No projects found in configuration".into())
-    }
-
-    /// Create a sample configuration file (legacy method)
-    pub fn create_sample_config(path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
-        MultiProjectConfig::create_sample_config(path)
-    }
 } 
