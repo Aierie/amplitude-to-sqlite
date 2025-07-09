@@ -474,6 +474,172 @@ impl ExportEvent {
     }
 }
 
+/// Trait for filtering ExportEvent instances
+pub trait ExportEventFilter {
+    /// Determine whether an event should be included (true) or filtered out (false)
+    fn should_include(&self, event: &ExportEvent) -> bool;
+    
+    /// Get a description of the filter for logging/debugging purposes
+    fn description(&self) -> &str;
+}
+
+/// Default implementation of ExportEventFilter that includes all events
+pub struct DefaultFilter;
+
+impl ExportEventFilter for DefaultFilter {
+    fn should_include(&self, _event: &ExportEvent) -> bool {
+        true
+    }
+    
+    fn description(&self) -> &str {
+        "Default filter (includes all events)"
+    }
+}
+
+/// Filter that matches events based on multiple criteria
+pub struct MultiCriteriaFilter {
+    event_type: Option<String>,
+    user_id: Option<String>,
+    device_id: Option<String>,
+    insert_id: Option<String>,
+    uuid: Option<String>,
+    start_time: Option<DateTime<Utc>>,
+    end_time: Option<DateTime<Utc>>,
+    invert: bool,
+}
+
+impl MultiCriteriaFilter {
+    /// Create a new MultiCriteriaFilter with the specified criteria
+    pub fn new(
+        event_type: Option<String>,
+        user_id: Option<String>,
+        device_id: Option<String>,
+        insert_id: Option<String>,
+        uuid: Option<String>,
+        start_time: Option<DateTime<Utc>>,
+        end_time: Option<DateTime<Utc>>,
+        invert: bool,
+    ) -> Self {
+        Self {
+            event_type,
+            user_id,
+            device_id,
+            insert_id,
+            uuid,
+            start_time,
+            end_time,
+            invert,
+        }
+    }
+    
+    /// Builder method to set event type filter
+    pub fn event_type(mut self, event_type: Option<String>) -> Self {
+        self.event_type = event_type;
+        self
+    }
+    
+    /// Builder method to set user ID filter
+    pub fn user_id(mut self, user_id: Option<String>) -> Self {
+        self.user_id = user_id;
+        self
+    }
+    
+    /// Builder method to set device ID filter
+    pub fn device_id(mut self, device_id: Option<String>) -> Self {
+        self.device_id = device_id;
+        self
+    }
+    
+    /// Builder method to set insert ID filter
+    pub fn insert_id(mut self, insert_id: Option<String>) -> Self {
+        self.insert_id = insert_id;
+        self
+    }
+    
+    /// Builder method to set UUID filter
+    pub fn uuid(mut self, uuid: Option<String>) -> Self {
+        self.uuid = uuid;
+        self
+    }
+    
+    /// Builder method to set start time filter
+    pub fn start_time(mut self, start_time: Option<DateTime<Utc>>) -> Self {
+        self.start_time = start_time;
+        self
+    }
+    
+    /// Builder method to set end time filter
+    pub fn end_time(mut self, end_time: Option<DateTime<Utc>>) -> Self {
+        self.end_time = end_time;
+        self
+    }
+    
+    /// Builder method to set invert flag
+    pub fn invert(mut self, invert: bool) -> Self {
+        self.invert = invert;
+        self
+    }
+}
+
+impl ExportEventFilter for MultiCriteriaFilter {
+    fn should_include(&self, event: &ExportEvent) -> bool {
+        let mut matches = true;
+        
+        // Check event_type filter
+        if let Some(ref filter_event_type) = self.event_type {
+            matches = matches && event.event_type.as_deref() == Some(filter_event_type);
+        }
+        
+        // Check user_id filter
+        if let Some(ref filter_user_id) = self.user_id {
+            matches = matches && event.user_id.as_deref() == Some(filter_user_id);
+        }
+        
+        // Check device_id filter
+        if let Some(ref filter_device_id) = self.device_id {
+            matches = matches && event.device_id.as_deref() == Some(filter_device_id);
+        }
+        
+        // Check insert_id filter
+        if let Some(ref filter_insert_id) = self.insert_id {
+            matches = matches && event.insert_id.as_deref() == Some(filter_insert_id);
+        }
+        
+        // Check uuid filter
+        if let Some(ref filter_uuid) = self.uuid {
+            matches = matches && event.uuid.as_deref() == Some(filter_uuid);
+        }
+        
+        // Check time filters
+        if let Some(start_filter) = self.start_time {
+            if let Some(event_time) = event.event_time {
+                matches = matches && event_time >= start_filter;
+            } else {
+                matches = false;
+            }
+        }
+        
+        if let Some(end_filter) = self.end_time {
+            if let Some(event_time) = event.event_time {
+                matches = matches && event_time <= end_filter;
+            } else {
+                matches = false;
+            }
+        }
+        
+        // Invert the result if requested
+        if self.invert {
+            !matches
+        } else {
+            matches
+        }
+    }
+    
+    fn description(&self) -> &str {
+        "Multi-criteria filter"
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

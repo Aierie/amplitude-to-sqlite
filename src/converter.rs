@@ -1,5 +1,5 @@
 use crate::amplitude_sdk::AmplitudeClient;
-use crate::amplitude_types::ExportEvent;
+use crate::amplitude_types::{ExportEvent, ExportEventFilter, MultiCriteriaFilter};
 use crate::project_selector::ProjectSelector;
 use chrono::{DateTime, Utc};
 use flate2::read::GzDecoder;
@@ -1006,15 +1006,6 @@ pub fn filter_events(
     end_time: Option<&str>,
     invert: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    println!("Filtering events in: {}", input_dir.display());
-    
-    // Create output directory if it doesn't exist
-    fs::create_dir_all(output_dir)?;
-    
-    // Parse all export events from the input directory
-    let events = parse_export_events_from_directory(input_dir)?;
-    println!("Found {} total events", events.len());
-    
     // Parse time filters if provided
     let start_time_filter = if let Some(start_str) = start_time {
         Some(DateTime::parse_from_str(start_str, "%Y-%m-%d %H:%M:%S")?.with_timezone(&Utc))
@@ -1028,61 +1019,40 @@ pub fn filter_events(
         None
     };
     
-    // Filter events based on criteria
+    // Create the filter using the trait-based approach
+    let filter = MultiCriteriaFilter::new(
+        event_type.map(|s| s.to_string()),
+        user_id.map(|s| s.to_string()),
+        device_id.map(|s| s.to_string()),
+        insert_id.map(|s| s.to_string()),
+        uuid.map(|s| s.to_string()),
+        start_time_filter,
+        end_time_filter,
+        invert,
+    );
+    
+    filter_events_with_filter(input_dir, output_dir, &filter)
+}
+
+/// Filter events using a trait-based filter
+pub fn filter_events_with_filter<F: ExportEventFilter>(
+    input_dir: &std::path::Path,
+    output_dir: &std::path::Path,
+    filter: &F,
+) -> Result<(), Box<dyn std::error::Error>> {
+    println!("Filtering events in: {} using {}", input_dir.display(), filter.description());
+    
+    // Create output directory if it doesn't exist
+    fs::create_dir_all(output_dir)?;
+    
+    // Parse all export events from the input directory
+    let events = parse_export_events_from_directory(input_dir)?;
+    println!("Found {} total events", events.len());
+    
+    // Filter events based on the provided filter
     let (remaining_events, removed_events): (Vec<&ExportEvent>, Vec<&ExportEvent>) = events
         .iter()
-        .partition(|event| {
-            let mut matches = true;
-            
-            // Check event_type filter
-            if let Some(filter_event_type) = event_type {
-                matches = matches && event.event_type.as_deref() == Some(filter_event_type);
-            }
-            
-            // Check user_id filter
-            if let Some(filter_user_id) = user_id {
-                matches = matches && event.user_id.as_deref() == Some(filter_user_id);
-            }
-            
-            // Check device_id filter
-            if let Some(filter_device_id) = device_id {
-                matches = matches && event.device_id.as_deref() == Some(filter_device_id);
-            }
-            
-            // Check insert_id filter
-            if let Some(filter_insert_id) = insert_id {
-                matches = matches && event.insert_id.as_deref() == Some(filter_insert_id);
-            }
-            
-            // Check uuid filter
-            if let Some(filter_uuid) = uuid {
-                matches = matches && event.uuid.as_deref() == Some(filter_uuid);
-            }
-            
-            // Check time filters
-            if let Some(start_filter) = start_time_filter {
-                if let Some(event_time) = event.event_time {
-                    matches = matches && event_time >= start_filter;
-                } else {
-                    matches = false;
-                }
-            }
-            
-            if let Some(end_filter) = end_time_filter {
-                if let Some(event_time) = event.event_time {
-                    matches = matches && event_time <= end_filter;
-                } else {
-                    matches = false;
-                }
-            }
-            
-            // Invert the result if requested
-            if invert {
-                !matches
-            } else {
-                matches
-            }
-        });
+        .partition(|event| filter.should_include(event));
     
     println!("Filtered {} events remaining, {} events removed", remaining_events.len(), removed_events.len());
     
@@ -1092,16 +1062,7 @@ pub fn filter_events(
         "total_events": events.len(),
         "remaining_events": remaining_events.len(),
         "removed_events": removed_events.len(),
-        "filters_applied": {
-            "event_type": event_type,
-            "user_id": user_id,
-            "device_id": device_id,
-            "insert_id": insert_id,
-            "uuid": uuid,
-            "start_time": start_time,
-            "end_time": end_time,
-            "invert": invert
-        }
+        "filter_description": filter.description()
     });
     
     let summary_file = File::create(&summary_path)?;
@@ -1459,7 +1420,6 @@ mod tests {
         assert_eq!(summary["total_events"], 4);
         assert_eq!(summary["remaining_events"], 2);
         assert_eq!(summary["removed_events"], 2);
-        assert_eq!(summary["filters_applied"]["event_type"], "page_view");
         
         // Verify remaining events file was created
         let remaining_path = output_dir.path().join("remaining_events.json");
