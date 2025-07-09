@@ -2,6 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
+use uuid::Uuid;
 
 /// Request body for the Batch Event Upload API
 #[derive(Debug, Serialize, Deserialize)]
@@ -477,7 +478,7 @@ impl ExportEvent {
 /// Trait for filtering ExportEvent instances
 pub trait ExportEventFilter {
     /// Determine whether an event should be included (true) or filtered out (false)
-    fn should_include(&self, event: &ExportEvent) -> bool;
+    fn should_include(&mut self, event: &ExportEvent) -> bool;
     
     /// Get a description of the filter for logging/debugging purposes
     fn description(&self) -> &str;
@@ -487,7 +488,7 @@ pub trait ExportEventFilter {
 pub struct DefaultFilter;
 
 impl ExportEventFilter for DefaultFilter {
-    fn should_include(&self, _event: &ExportEvent) -> bool {
+    fn should_include(&mut self, _event: &ExportEvent) -> bool {
         true
     }
     
@@ -582,7 +583,7 @@ impl MultiCriteriaFilter {
 }
 
 impl ExportEventFilter for MultiCriteriaFilter {
-    fn should_include(&self, event: &ExportEvent) -> bool {
+    fn should_include(&mut self, event: &ExportEvent) -> bool {
         let mut matches = true;
         
         // Check event_type filter
@@ -637,6 +638,70 @@ impl ExportEventFilter for MultiCriteriaFilter {
     
     fn description(&self) -> &str {
         "Multi-criteria filter"
+    }
+}
+
+/// Filter that deduplicates events based on UUID vs non-UUID insert_ids
+/// 
+/// This filter works as follows:
+/// 1. If an event's insert_id is a valid UUID, it is always included
+/// 2. If an event's insert_id is not a UUID, it is only included if it's the first
+///    event with that insert_id encountered
+pub struct UUIDDeduplicationFilter {
+    non_uuid_events: std::collections::HashMap<String, Vec<ExportEvent>>,
+}
+
+impl UUIDDeduplicationFilter {
+    /// Create a new UUIDDeduplicationFilter
+    pub fn new() -> Self {
+        Self {
+            non_uuid_events: std::collections::HashMap::new(),
+        }
+    }
+    
+    /// Check if a string is a valid UUID
+    fn is_uuid(s: &str) -> bool {
+        Uuid::parse_str(s).is_ok()
+    }
+    
+    /// Get statistics about the filter's operation
+    pub fn get_stats(&self) -> (usize, usize) {
+        let total_non_uuid_events: usize = self.non_uuid_events.values().map(|v| v.len()).sum();
+        let unique_insert_ids = self.non_uuid_events.len();
+        (total_non_uuid_events, unique_insert_ids)
+    }
+}
+
+impl ExportEventFilter for UUIDDeduplicationFilter {
+    fn should_include(&mut self, event: &ExportEvent) -> bool {
+        // Get the insert_id, if it doesn't exist, treat as non-UUID
+        let insert_id = match &event.insert_id {
+            Some(id) if !id.is_empty() => id,
+            _ => return false, // No insert_id, filter out
+        };
+        
+        // Check if insert_id is a UUID
+        if Self::is_uuid(insert_id) {
+            // UUID events are always included
+            return true;
+        }
+        
+        // Non-UUID event - check if this is the first one with this insert_id
+        let events_with_this_id = self.non_uuid_events.entry(insert_id.clone()).or_insert_with(Vec::new);
+        
+        if events_with_this_id.is_empty() {
+            // First event with this insert_id, include it and add to tracking
+            events_with_this_id.push(event.clone());
+            true
+        } else {
+            // Not the first event with this insert_id, filter it out
+            events_with_this_id.push(event.clone());
+            false
+        }
+    }
+    
+    fn description(&self) -> &str {
+        "UUID-based deduplication filter"
     }
 }
 
@@ -923,5 +988,68 @@ mod tests {
             "Successfully completed round-trip JSON conversion test for {} events",
             export_events.len()
         );
+    }
+
+    #[test]
+    fn test_uuid_deduplication_filter() {
+        let mut filter = UUIDDeduplicationFilter::new();
+        
+        // Create test events
+        let uuid_event = ExportEvent {
+            insert_id: Some("550e8400-e29b-41d4-a716-446655440000".to_string()), // Valid UUID
+            event_type: Some("test_event".to_string()),
+            ..Default::default()
+        };
+        
+        let non_uuid_event1 = ExportEvent {
+            insert_id: Some("non-uuid-id-1".to_string()), // Not a UUID
+            event_type: Some("test_event".to_string()),
+            ..Default::default()
+        };
+        
+        let non_uuid_event2 = ExportEvent {
+            insert_id: Some("non-uuid-id-1".to_string()), // Same non-UUID ID
+            event_type: Some("test_event".to_string()),
+            ..Default::default()
+        };
+        
+        let non_uuid_event3 = ExportEvent {
+            insert_id: Some("non-uuid-id-2".to_string()), // Different non-UUID ID
+            event_type: Some("test_event".to_string()),
+            ..Default::default()
+        };
+        
+        // Test UUID event - should always be included
+        assert!(filter.should_include(&uuid_event));
+        assert!(filter.should_include(&uuid_event)); // Even if called multiple times
+        
+        // Test first non-UUID event - should be included
+        assert!(filter.should_include(&non_uuid_event1));
+        
+        // Test second non-UUID event with same ID - should be filtered out
+        assert!(!filter.should_include(&non_uuid_event2));
+        
+        // Test third non-UUID event with different ID - should be included
+        assert!(filter.should_include(&non_uuid_event3));
+        
+        // Test events without insert_id - should be filtered out
+        let no_insert_id_event = ExportEvent {
+            insert_id: None,
+            event_type: Some("test_event".to_string()),
+            ..Default::default()
+        };
+        assert!(!filter.should_include(&no_insert_id_event));
+        
+        let empty_insert_id_event = ExportEvent {
+            insert_id: Some("".to_string()),
+            event_type: Some("test_event".to_string()),
+            ..Default::default()
+        };
+        assert!(!filter.should_include(&empty_insert_id_event));
+        
+        // Check stats
+        let (total_non_uuid, unique_ids) = filter.get_stats();
+        assert_eq!(total_non_uuid, 3); // non_uuid_event1, non_uuid_event2, non_uuid_event3
+        assert_eq!(unique_ids, 2); // "non-uuid-id-1", "non-uuid-id-2"
     }
 }

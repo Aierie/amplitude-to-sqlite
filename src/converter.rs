@@ -1020,7 +1020,7 @@ pub fn filter_events(
     };
     
     // Create the filter using the trait-based approach
-    let filter = MultiCriteriaFilter::new(
+    let mut filter = MultiCriteriaFilter::new(
         event_type.map(|s| s.to_string()),
         user_id.map(|s| s.to_string()),
         device_id.map(|s| s.to_string()),
@@ -1031,14 +1031,14 @@ pub fn filter_events(
         invert,
     );
     
-    filter_events_with_filter(input_dir, output_dir, &filter)
+    filter_events_with_filter(input_dir, output_dir, &mut filter)
 }
 
 /// Filter events using a trait-based filter
 pub fn filter_events_with_filter<F: ExportEventFilter>(
     input_dir: &std::path::Path,
     output_dir: &std::path::Path,
-    filter: &F,
+    filter: &mut F,
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("Filtering events in: {} using {}", input_dir.display(), filter.description());
     
@@ -1122,6 +1122,19 @@ pub fn filter_events_with_filter<F: ExportEventFilter>(
     
     println!("Event filtering completed successfully!");
     Ok(())
+}
+
+/// Filter events using UUID-based deduplication
+/// 
+/// This function demonstrates how to use the UUIDDeduplicationFilter to:
+/// 1. Always include events with UUID insert_ids
+/// 2. Only include the first occurrence of events with non-UUID insert_ids
+pub fn filter_events_uuid_deduplication(
+    input_dir: &std::path::Path,
+    output_dir: &std::path::Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut filter = crate::amplitude_types::UUIDDeduplicationFilter::new();
+    filter_events_with_filter(input_dir, output_dir, &mut filter)
 }
 
 /// Sanitize filename to be filesystem-safe
