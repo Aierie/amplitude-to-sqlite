@@ -9,6 +9,7 @@ use std::fs::{self, File};
 use std::io::{self, BufRead, BufReader, BufWriter, Write};
 use std::path::Path;
 use zip::ZipArchive;
+use tokio::time::{sleep, Duration};
 
 #[derive(Debug)]
 pub struct ParsedItem {
@@ -418,6 +419,10 @@ pub async fn process_and_upload_events_with_project(
                 return Err(e);
             }
         }
+
+        // Idk what amplitude is doing. The app EPS threshold is not super clear
+        println!("Waiting 1 second before next batch...");
+        sleep(Duration::from_millis(1000)).await;
     }
     
     println!("Upload completed successfully!");
