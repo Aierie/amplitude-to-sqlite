@@ -6,7 +6,7 @@ use flate2::read::GzDecoder;
 use rusqlite::{params, Connection, Result};
 use serde_json::Value;
 use std::fs::{self, File};
-use std::io::{self, BufRead, BufReader, BufWriter};
+use std::io::{self, BufRead, BufReader, BufWriter, Write};
 use std::path::Path;
 use zip::ZipArchive;
 
@@ -994,6 +994,176 @@ pub fn check_for_duplicate_insert_ids(
     Ok(())
 }
 
+/// Filter events based on criteria and output remaining/removed items
+pub fn filter_events(
+    input_dir: &std::path::Path,
+    output_dir: &std::path::Path,
+    event_type: Option<&str>,
+    user_id: Option<&str>,
+    device_id: Option<&str>,
+    insert_id: Option<&str>,
+    uuid: Option<&str>,
+    start_time: Option<&str>,
+    end_time: Option<&str>,
+    invert: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    println!("Filtering events in: {}", input_dir.display());
+    
+    // Create output directory if it doesn't exist
+    fs::create_dir_all(output_dir)?;
+    
+    // Parse all export events from the input directory
+    let events = parse_export_events_from_directory(input_dir)?;
+    println!("Found {} total events", events.len());
+    
+    // Parse time filters if provided
+    let start_time_filter = if let Some(start_str) = start_time {
+        Some(DateTime::parse_from_str(start_str, "%Y-%m-%d %H:%M:%S")?.with_timezone(&Utc))
+    } else {
+        None
+    };
+    
+    let end_time_filter = if let Some(end_str) = end_time {
+        Some(DateTime::parse_from_str(end_str, "%Y-%m-%d %H:%M:%S")?.with_timezone(&Utc))
+    } else {
+        None
+    };
+    
+    // Filter events based on criteria
+    let (remaining_events, removed_events): (Vec<&ExportEvent>, Vec<&ExportEvent>) = events
+        .iter()
+        .partition(|event| {
+            let mut matches = true;
+            
+            // Check event_type filter
+            if let Some(filter_event_type) = event_type {
+                matches = matches && event.event_type.as_deref() == Some(filter_event_type);
+            }
+            
+            // Check user_id filter
+            if let Some(filter_user_id) = user_id {
+                matches = matches && event.user_id.as_deref() == Some(filter_user_id);
+            }
+            
+            // Check device_id filter
+            if let Some(filter_device_id) = device_id {
+                matches = matches && event.device_id.as_deref() == Some(filter_device_id);
+            }
+            
+            // Check insert_id filter
+            if let Some(filter_insert_id) = insert_id {
+                matches = matches && event.insert_id.as_deref() == Some(filter_insert_id);
+            }
+            
+            // Check uuid filter
+            if let Some(filter_uuid) = uuid {
+                matches = matches && event.uuid.as_deref() == Some(filter_uuid);
+            }
+            
+            // Check time filters
+            if let Some(start_filter) = start_time_filter {
+                if let Some(event_time) = event.event_time {
+                    matches = matches && event_time >= start_filter;
+                } else {
+                    matches = false;
+                }
+            }
+            
+            if let Some(end_filter) = end_time_filter {
+                if let Some(event_time) = event.event_time {
+                    matches = matches && event_time <= end_filter;
+                } else {
+                    matches = false;
+                }
+            }
+            
+            // Invert the result if requested
+            if invert {
+                !matches
+            } else {
+                matches
+            }
+        });
+    
+    println!("Filtered {} events remaining, {} events removed", remaining_events.len(), removed_events.len());
+    
+    // Create summary file
+    let summary_path = output_dir.join("filter_summary.json");
+    let summary = serde_json::json!({
+        "total_events": events.len(),
+        "remaining_events": remaining_events.len(),
+        "removed_events": removed_events.len(),
+        "filters_applied": {
+            "event_type": event_type,
+            "user_id": user_id,
+            "device_id": device_id,
+            "insert_id": insert_id,
+            "uuid": uuid,
+            "start_time": start_time,
+            "end_time": end_time,
+            "invert": invert
+        }
+    });
+    
+    let summary_file = File::create(&summary_path)?;
+    serde_json::to_writer_pretty(summary_file, &summary)?;
+    println!("Summary written to: {}", summary_path.display());
+    
+    // Write remaining events to JSON file
+    if !remaining_events.is_empty() {
+        let remaining_path = output_dir.join("remaining_events.json");
+        let remaining_data = serde_json::json!({
+            "count": remaining_events.len(),
+            "events": remaining_events.iter().map(|event| {
+                serde_json::to_value(event).unwrap()
+            }).collect::<Vec<_>>()
+        });
+        
+        let remaining_file = File::create(&remaining_path)?;
+        serde_json::to_writer_pretty(remaining_file, &remaining_data)?;
+        println!("Remaining events written to: {}", remaining_path.display());
+    }
+    
+    // Write removed events to JSON file
+    if !removed_events.is_empty() {
+        let removed_path = output_dir.join("removed_events.json");
+        let removed_data = serde_json::json!({
+            "count": removed_events.len(),
+            "events": removed_events.iter().map(|event| {
+                serde_json::to_value(event).unwrap()
+            }).collect::<Vec<_>>()
+        });
+        
+        let removed_file = File::create(&removed_path)?;
+        serde_json::to_writer_pretty(removed_file, &removed_data)?;
+        println!("Removed events written to: {}", removed_path.display());
+    }
+    
+    // Also write individual JSONL files for easier processing
+    if !remaining_events.is_empty() {
+        let remaining_jsonl_path = output_dir.join("remaining_events.jsonl");
+        let mut remaining_jsonl_file = File::create(&remaining_jsonl_path)?;
+        for event in remaining_events {
+            let event_json = serde_json::to_string(event)?;
+            writeln!(remaining_jsonl_file, "{}", event_json)?;
+        }
+        println!("Remaining events (JSONL) written to: {}", remaining_jsonl_path.display());
+    }
+    
+    if !removed_events.is_empty() {
+        let removed_jsonl_path = output_dir.join("removed_events.jsonl");
+        let mut removed_jsonl_file = File::create(&removed_jsonl_path)?;
+        for event in removed_events {
+            let event_json = serde_json::to_string(event)?;
+            writeln!(removed_jsonl_file, "{}", event_json)?;
+        }
+        println!("Removed events (JSONL) written to: {}", removed_jsonl_path.display());
+    }
+    
+    println!("Event filtering completed successfully!");
+    Ok(())
+}
+
 /// Sanitize filename to be filesystem-safe
 fn sanitize_filename(filename: &str) -> String {
     filename
@@ -1258,5 +1428,88 @@ mod tests {
         let dup2_data = duplicates.iter().find(|d| d["insert_id"] == "dup-2").unwrap();
         assert_eq!(dup2_data["count"], 2);
         assert_eq!(dup2_data["events"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn test_filter_events() {
+        let test_dir = tempdir().unwrap();
+        let output_dir = tempdir().unwrap();
+        
+        // Create test JSON files with various events
+        let test_file = test_dir.path().join("test.json");
+        
+        let test_data = r#"{"$insert_id":"id-1","event_type":"page_view","event_time":"2025-07-01 16:34:54.837000","user_id":"user-1","device_id":"device-1","event_properties":{},"user_properties":{},"groups":{},"group_properties":{},"uuid":"uuid-1"}
+{"$insert_id":"id-2","event_type":"button_click","event_time":"2025-07-01 16:35:54.837000","user_id":"user-2","device_id":"device-2","event_properties":{},"user_properties":{},"groups":{},"group_properties":{},"uuid":"uuid-2"}
+{"$insert_id":"id-3","event_type":"page_view","event_time":"2025-07-01 16:36:54.837000","user_id":"user-1","device_id":"device-3","event_properties":{},"user_properties":{},"groups":{},"group_properties":{},"uuid":"uuid-3"}
+{"$insert_id":"id-4","event_type":"form_submit","event_time":"2025-07-01 16:37:54.837000","user_id":"user-3","device_id":"device-1","event_properties":{},"user_properties":{},"groups":{},"group_properties":{},"uuid":"uuid-4"}"#;
+        
+        let mut file = File::create(&test_file).unwrap();
+        file.write_all(test_data.as_bytes()).unwrap();
+        
+        // Test filtering by event_type
+        filter_events(test_dir.path(), output_dir.path(), Some("page_view"), None, None, None, None, None, None, false).unwrap();
+        
+        // Verify the summary file was created
+        let summary_path = output_dir.path().join("filter_summary.json");
+        assert!(summary_path.exists());
+        
+        // Read and verify summary content
+        let summary_content = fs::read_to_string(&summary_path).unwrap();
+        let summary: serde_json::Value = serde_json::from_str(&summary_content).unwrap();
+        
+        assert_eq!(summary["total_events"], 4);
+        assert_eq!(summary["remaining_events"], 2);
+        assert_eq!(summary["removed_events"], 2);
+        assert_eq!(summary["filters_applied"]["event_type"], "page_view");
+        
+        // Verify remaining events file was created
+        let remaining_path = output_dir.path().join("remaining_events.json");
+        assert!(remaining_path.exists());
+        
+        let remaining_content = fs::read_to_string(&remaining_path).unwrap();
+        let remaining: serde_json::Value = serde_json::from_str(&remaining_content).unwrap();
+        
+        assert_eq!(remaining["count"], 2);
+        let remaining_events = remaining["events"].as_array().unwrap();
+        assert_eq!(remaining_events.len(), 2);
+        
+        // Check that both remaining events are page_view events
+        for event in remaining_events {
+            assert_eq!(event["event_type"], "page_view");
+        }
+        
+        // Verify removed events file was created
+        let removed_path = output_dir.path().join("removed_events.json");
+        assert!(removed_path.exists());
+        
+        let removed_content = fs::read_to_string(&removed_path).unwrap();
+        let removed: serde_json::Value = serde_json::from_str(&removed_content).unwrap();
+        
+        assert_eq!(removed["count"], 2);
+        let removed_events = removed["events"].as_array().unwrap();
+        assert_eq!(removed_events.len(), 2);
+        
+        // Check that removed events are not page_view events
+        for event in removed_events {
+            assert_ne!(event["event_type"], "page_view");
+        }
+        
+        // Verify JSONL files were created
+        let remaining_jsonl_path = output_dir.path().join("remaining_events.jsonl");
+        let removed_jsonl_path = output_dir.path().join("removed_events.jsonl");
+        
+        assert!(remaining_jsonl_path.exists());
+        assert!(removed_jsonl_path.exists());
+        
+        // Test with multiple filters
+        let output_dir2 = tempdir().unwrap();
+        filter_events(test_dir.path(), output_dir2.path(), Some("page_view"), Some("user-1"), None, None, None, None, None, false).unwrap();
+        
+        let summary_path2 = output_dir2.path().join("filter_summary.json");
+        let summary_content2 = fs::read_to_string(&summary_path2).unwrap();
+        let summary2: serde_json::Value = serde_json::from_str(&summary_content2).unwrap();
+        
+        assert_eq!(summary2["remaining_events"], 2); // Both page_view events from user-1
+        assert_eq!(summary2["removed_events"], 2); // The other 2 events
     }
 } 

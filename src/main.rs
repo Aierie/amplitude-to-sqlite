@@ -127,6 +127,49 @@ enum Commands {
         output_dir: PathBuf,
     },
 
+    /// Filter events based on criteria and output remaining/removed items
+    FilterEvents {
+        /// Input directory containing exported JSON files
+        #[arg(long)]
+        input_dir: PathBuf,
+        
+        /// Output directory for filtered results
+        #[arg(long, default_value = "./filter-results")]
+        output_dir: PathBuf,
+
+        /// Filter by event type (exact match)
+        #[arg(long)]
+        event_type: Option<String>,
+
+        /// Filter by user ID (exact match)
+        #[arg(long)]
+        user_id: Option<String>,
+
+        /// Filter by device ID (exact match)
+        #[arg(long)]
+        device_id: Option<String>,
+
+        /// Filter by insert ID (exact match)
+        #[arg(long)]
+        insert_id: Option<String>,
+
+        /// Filter by UUID (exact match)
+        #[arg(long)]
+        uuid: Option<String>,
+
+        /// Start time filter (YYYY-MM-DD HH:MM:SS format)
+        #[arg(long)]
+        start_time: Option<String>,
+
+        /// End time filter (YYYY-MM-DD HH:MM:SS format)
+        #[arg(long)]
+        end_time: Option<String>,
+
+        /// Invert the filter (keep items that don't match criteria)
+        #[arg(long, default_value = "false")]
+        invert: bool,
+    },
+
     /// Manage projects in configuration
     Projects {
         #[command(subcommand)]
@@ -174,6 +217,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Commands::CheckForDuplicates { input_dir, output_dir } => {
             converter::check_for_duplicate_insert_ids(input_dir, output_dir)?;
+        }
+        Commands::FilterEvents { input_dir, output_dir, event_type, user_id, device_id, insert_id, uuid, start_time, end_time, invert } => {
+            converter::filter_events(input_dir, output_dir, event_type.as_deref(), user_id.as_deref(), device_id.as_deref(), insert_id.as_deref(), uuid.as_deref(), start_time.as_deref(), end_time.as_deref(), *invert)?;
         }
         Commands::Projects { subcommand } => {
             match subcommand {
