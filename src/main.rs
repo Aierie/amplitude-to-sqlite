@@ -207,7 +207,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             verifier::print_verification_summary(&results);
         }
         Commands::Upload { input_dir, batch_size, project } => {
-            converter::process_and_upload_events_with_project(input_dir, *batch_size, project.as_deref()).await?;
+            converter::process_and_upload_events_with_project(input_dir, project.as_deref()).await?;
         }
         Commands::RoundTripE2E { start_date, end_date, output_dir, export_from, upload_to } => {
             converter::round_trip_e2e(start_date, end_date, output_dir, export_from.as_deref(), upload_to.as_deref()).await?;

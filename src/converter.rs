@@ -360,7 +360,6 @@ fn write_parsed_items_to_sqlite<P: AsRef<Path>>(
 /// Process JSON files and upload events via batch API with project selection
 pub async fn process_and_upload_events_with_project(
     input_dir: &std::path::Path,
-    batch_size: usize,
     project_name: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Select project
@@ -378,56 +377,127 @@ pub async fn process_and_upload_events_with_project(
     
     // Convert ExportEvents to Events
     let mut events = Vec::new();
+    let mut failed_conversions = Vec::new();
     for export_event in export_events {
         match export_event.to_batch_event() {
             Ok(event) => events.push(event),
             Err(e) => {
                 eprintln!("Failed to convert export event to batch event: {}", e);
+                failed_conversions.push(export_event);
                 continue;
             }
         }
     }
     println!("Successfully converted {} events", events.len());
+    if !failed_conversions.is_empty() {
+        println!("Failed to convert {} events", failed_conversions.len());
+    }
     
     // Sort events by time
     events.sort_by_key(|event| event.time);
     println!("Sorted events by timestamp");
     
-    // Upload events in batches
+    // Group events by user_id (or device_id if user_id is None)
+    let mut user_events: std::collections::HashMap<String, Vec<crate::amplitude_types::Event>> = std::collections::HashMap::new();
+    
+    for event in events {
+        let key = event.user_id.as_ref()
+            .map(|uid| format!("user:{}", uid))
+            .or_else(|| event.device_id.as_ref().map(|did| format!("device:{}", did)))
+            .unwrap_or_else(|| "unknown".to_string());
+        
+        user_events.entry(key).or_insert_with(Vec::new).push(event);
+    }
+    
+    println!("Grouped events by {} users/devices", user_events.len());
+    
+    // Upload events in batches of 65 per user/device
     let mut total_uploaded = 0;
     let mut total_batches = 0;
+    let mut failed_uploads = Vec::new();
+    let user_batch_size = 65;
     
-    for (batch_index, chunk) in events.chunks(batch_size).enumerate() {
-        println!("Uploading batch {} ({} events)", batch_index + 1, chunk.len());
+    for (user_key, user_event_list) in user_events {
+        println!("Processing {} events for {}", user_event_list.len(), user_key);
         
-        match client.send_events(chunk.to_vec()).await {
-            Ok(response) => {
-                total_uploaded += chunk.len();
-                total_batches += 1;
-                println!("Batch {} uploaded successfully", batch_index + 1);
-                
-                // Log any warnings or issues from the response
-                if let Some(error) = &response.error {
-                    eprintln!("Warning: {}", error);
+        // Sort events by time for this user/device
+        // let mut sorted_events = user_event_list;
+        // sorted_events.sort_by_key(|event| event.time);
+        
+        let total_batches_for_user = (user_event_list.len() + user_batch_size - 1) / user_batch_size;
+        
+        // Create chunks and collect them to avoid borrow checker issues
+        let chunks: Vec<_> = user_event_list.chunks(user_batch_size).collect();
+        
+        // Upload events in batches of 65 for this user/device
+        for (batch_index, chunk) in chunks.into_iter().enumerate() {
+            println!("Uploading batch {} for {} ({} events)", batch_index + 1, user_key, chunk.len());
+            
+            match client.send_events(chunk.to_vec()).await {
+                Ok(response) => {
+                    total_uploaded += chunk.len();
+                    total_batches += 1;
+                    println!("Batch {} for {} uploaded successfully", batch_index + 1, user_key);
+                    
+                    // Log any warnings or issues from the response
+                    if let Some(error) = &response.error {
+                        eprintln!("Warning: {}", error);
+                    }
+                    if let Some(missing_field) = &response.missing_field {
+                        eprintln!("Warning: Missing field: {}", missing_field);
+                    }
                 }
-                if let Some(missing_field) = &response.missing_field {
-                    eprintln!("Warning: Missing field: {}", missing_field);
+                Err(e) => {
+                    eprintln!("Failed to upload batch {} for {}: {}", batch_index + 1, user_key, e);
+                    // Store failed events for later saving
+                    for event in chunk {
+                        failed_uploads.push((event.clone(), format!("Upload error: {}", e)));
+                    }
                 }
             }
-            Err(e) => {
-                eprintln!("Failed to upload batch {}: {}", batch_index + 1, e);
-                return Err(e);
+
+            // Add 1 second delay between upload calls (except after the last batch)
+            if batch_index + 1 < total_batches_for_user {
+                println!("Waiting 1 second before next batch...");
+                sleep(Duration::from_millis(1000)).await;
             }
         }
-
-        // Idk what amplitude is doing. The app EPS threshold is not super clear
-        println!("Waiting 1 second before next batch...");
-        sleep(Duration::from_millis(1000)).await;
+    }
+    
+    // Save failed conversions to JSON file
+    if !failed_conversions.is_empty() {
+        let failed_conversions_path = input_dir.join("failed_conversions.json");
+        let failed_conversions_file = File::create(&failed_conversions_path)?;
+        serde_json::to_writer_pretty(failed_conversions_file, &failed_conversions)?;
+        println!("Saved {} failed conversions to {:?}", failed_conversions.len(), failed_conversions_path);
+    }
+    
+    // Save failed uploads to JSON file
+    if !failed_uploads.is_empty() {
+        let failed_uploads_path = input_dir.join("failed_uploads.json");
+        let failed_uploads_file = File::create(&failed_uploads_path)?;
+        
+        // Create a structured format for failed uploads
+        let failed_uploads_data: Vec<serde_json::Value> = failed_uploads
+            .iter()
+            .map(|(event, error)| {
+                serde_json::json!({
+                    "event": event,
+                    "error": error,
+                    "timestamp": chrono::Utc::now().to_rfc3339()
+                })
+            })
+            .collect();
+        
+        serde_json::to_writer_pretty(failed_uploads_file, &failed_uploads_data)?;
+        println!("Saved {} failed uploads to {:?}", failed_uploads.len(), failed_uploads_path);
     }
     
     println!("Upload completed successfully!");
     println!("Total events uploaded: {}", total_uploaded);
     println!("Total batches: {}", total_batches);
+    println!("Total failed conversions: {}", failed_conversions.len());
+    println!("Total failed uploads: {}", failed_uploads.len());
     
     Ok(())
 }
@@ -566,7 +636,7 @@ pub async fn round_trip_e2e(
     
     // Perform the upload to the upload_to project
     println!("\nStarting upload to project: {}", upload_project_name);
-    process_and_upload_events_with_project(&original_export_dir, 1000, Some(upload_project_name)).await?;
+    process_and_upload_events_with_project(&original_export_dir, Some(upload_project_name)).await?;
     println!("Upload completed successfully!");
     
     // Export from the upload_to project to a different directory for comparison
@@ -604,11 +674,13 @@ pub fn compare_export_events(
     // Parse events from both directories
     println!("Parsing events from original directory...");
     let original_events = parse_export_events_from_directory(original_dir)?;
-    println!("Found {} events in original directory", original_events.len());
+    let original_event_count = original_events.len();
+    println!("Found {} events in original directory", original_event_count);
     
     println!("Parsing events from comparison directory...");
     let comparison_events = parse_export_events_from_directory(comparison_dir)?;
-    println!("Found {} events in comparison directory", comparison_events.len());
+    let comparison_event_count = comparison_events.len();
+    println!("Found {} events in comparison directory", comparison_event_count);
     
     // Create maps keyed by insert_id for efficient lookup
     let mut original_map: std::collections::HashMap<String, ExportEvent> = std::collections::HashMap::new();
@@ -671,8 +743,8 @@ pub fn compare_export_events(
     let summary_path = output_dir.join("comparison_summary.json");
     let summary = serde_json::json!({
         "summary": {
-            "total_original_events": original_map.len(),
-            "total_comparison_events": comparison_map.len(),
+            "total_original_events": original_event_count,
+            "total_comparison_events": comparison_event_count,
             "identical_events": identical_events.len(),
             "different_events": different_events.len(),
             "only_in_original": only_in_original.len(),
