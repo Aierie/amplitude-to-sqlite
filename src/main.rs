@@ -7,6 +7,7 @@ mod converter;
 mod config;
 mod verifier;
 mod project_selector;
+mod difference_cleaner;
 
 #[derive(Parser)]
 #[command(name = "amplitude-cli")]
@@ -175,6 +176,13 @@ enum Commands {
         #[command(subcommand)]
         subcommand: ProjectCommands,
     },
+
+    /// Clean up differences in comparison results where property names are the only difference
+    CleanDifferences {
+        /// Directory containing comparison difference files
+        #[arg(long)]
+        differences_dir: PathBuf,
+    },
 }
 
 #[derive(Subcommand)]
@@ -242,6 +250,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     selector.save_config(None)?;
                 }
             }
+        }
+        Commands::CleanDifferences { differences_dir } => {
+            difference_cleaner::clean_property_name_differences(differences_dir)?;
         }
     }
 
