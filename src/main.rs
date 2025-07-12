@@ -9,6 +9,7 @@ mod verifier;
 mod project_selector;
 mod difference_cleaner;
 mod exporter;
+mod uploader;
 
 #[derive(Parser)]
 #[command(name = "amplitude-cli")]
@@ -206,7 +207,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let project_config = selector.select_project(project.as_deref())?;
             
             // Call the core upload function with the selected project config
-            converter::process_and_upload_events(input_dir, project_config).await?;
+            uploader::process_and_upload_events(input_dir, project_config).await?;
         }
 
         Commands::Compare { original_dir, comparison_dir, output_dir } => {
