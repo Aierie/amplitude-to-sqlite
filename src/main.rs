@@ -22,6 +22,71 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Create a sample configuration file
+    Init {
+        /// Output path for the configuration file
+        #[arg(long, default_value = "./amplitude.toml")]
+        config_path: PathBuf,
+    },
+
+    /// Manage projects and perform project-specific operations
+    Project {
+        #[command(subcommand)]
+        subcommand: ProjectCommands,
+    },
+
+    /// Transform and process Amplitude data
+    Transform {
+        #[command(subcommand)]
+        subcommand: TransformCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum ProjectCommands {
+    /// List all configured projects
+    List,
+    
+    /// Add a new project interactively
+    Add,
+
+    /// Export events from Amplitude to JSON files
+    Export {
+        /// Start date for export (YYYY-MM-DD format)
+        #[arg(long)]
+        start_date: String,
+        
+        /// End date for export (YYYY-MM-DD format)
+        #[arg(long)]
+        end_date: String,
+        
+        /// Output directory for exported files
+        #[arg(long, default_value = "./export")]
+        output_dir: PathBuf,
+
+        /// Project name to use (if not specified, will prompt for selection)
+        #[arg(long)]
+        project: Option<String>,
+    },
+
+    /// Process JSON files and upload events via batch API
+    Upload {
+        /// Input directory containing JSON files with ExportEvents
+        #[arg(long)]
+        input_dir: PathBuf,
+        
+        /// Batch size for uploads (default: 1000)
+        #[arg(long, default_value = "1000")]
+        batch_size: usize,
+
+        /// Project name to use (if not specified, will prompt for selection)
+        #[arg(long)]
+        project: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum TransformCommands {
     /// Convert exported Amplitude JSON files to SQLite database
     Convert {
         /// Input directory containing exported JSON files
@@ -31,13 +96,6 @@ enum Commands {
         /// Output SQLite database file
         #[arg(long, default_value = "amplitude_data.sqlite")]
         output_db: PathBuf,
-    },
-
-    /// Create a sample configuration file
-    Init {
-        /// Output path for the configuration file
-        #[arg(long, default_value = "./amplitude.toml")]
-        config_path: PathBuf,
     },
 
     /// Verify round-trip deserialization of JSON files
@@ -116,12 +174,6 @@ enum Commands {
         invert: bool,
     },
 
-    /// Manage projects and perform project-specific operations
-    Project {
-        #[command(subcommand)]
-        subcommand: ProjectCommands,
-    },
-
     /// Clean up differences in comparison results where property names are the only difference
     CleanDifferences {
         /// Directory containing comparison difference files
@@ -130,73 +182,13 @@ enum Commands {
     },
 }
 
-#[derive(Subcommand)]
-enum ProjectCommands {
-    /// List all configured projects
-    List,
-    
-    /// Add a new project interactively
-    Add,
-
-    /// Export events from Amplitude to JSON files
-    Export {
-        /// Start date for export (YYYY-MM-DD format)
-        #[arg(long)]
-        start_date: String,
-        
-        /// End date for export (YYYY-MM-DD format)
-        #[arg(long)]
-        end_date: String,
-        
-        /// Output directory for exported files
-        #[arg(long, default_value = "./export")]
-        output_dir: PathBuf,
-
-        /// Project name to use (if not specified, will prompt for selection)
-        #[arg(long)]
-        project: Option<String>,
-    },
-
-    /// Process JSON files and upload events via batch API
-    Upload {
-        /// Input directory containing JSON files with ExportEvents
-        #[arg(long)]
-        input_dir: PathBuf,
-        
-        /// Batch size for uploads (default: 1000)
-        #[arg(long, default_value = "1000")]
-        batch_size: usize,
-
-        /// Project name to use (if not specified, will prompt for selection)
-        #[arg(long)]
-        project: Option<String>,
-    },
-}
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
     match &cli.command {
-        Commands::Convert { input_dir, output_db } => {
-            converter::convert_json_to_sqlite(input_dir, output_db)?;
-        }
         Commands::Init { config_path } => {
             config::MultiProjectConfig::create_sample_config(config_path)?;
-        }
-        Commands::VerifyDeserialization { input_dir } => {
-            println!("Verifying JSON files in: {}", input_dir.display());
-            let results = verifier::verify_directory(input_dir)?;
-            verifier::print_verification_summary(&results);
-        }
-        Commands::Compare { original_dir, comparison_dir, output_dir } => {
-            converter::compare_export_events(original_dir, comparison_dir, output_dir)?;
-        }
-        Commands::CheckForDuplicates { input_dir, output_dir } => {
-            converter::check_for_duplicate_insert_ids(input_dir, output_dir)?;
-        }
-        Commands::FilterEvents { input_dir, output_dir, event_type, user_id, device_id, insert_id, uuid, start_time, end_time, invert } => {
-            converter::filter_events(input_dir, output_dir, event_type.as_deref(), user_id.as_deref(), device_id.as_deref(), insert_id.as_deref(), uuid.as_deref(), start_time.as_deref(), end_time.as_deref(), *invert)?;
         }
         Commands::Project { subcommand } => {
             match subcommand {
@@ -226,7 +218,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     // Call the core export function with the selected project config
                     exporter::export_amplitude_data(start_date, end_date, output_dir, project_config).await?;
                 }
-                ProjectCommands::Upload { input_dir, batch_size, project } => {
+                ProjectCommands::Upload { input_dir, batch_size: _, project } => {
                     // Select project first
                     let selector = project_selector::ProjectSelector::new()?;
                     let project_config = selector.select_project(project.as_deref())?;
@@ -236,8 +228,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         }
-        Commands::CleanDifferences { differences_dir } => {
-            difference_cleaner::clean_property_name_differences(differences_dir)?;
+        Commands::Transform { subcommand } => {
+            match subcommand {
+                TransformCommands::Convert { input_dir, output_db } => {
+                    converter::convert_json_to_sqlite(input_dir, output_db)?;
+                }
+                TransformCommands::VerifyDeserialization { input_dir } => {
+                    println!("Verifying JSON files in: {}", input_dir.display());
+                    let results = verifier::verify_directory(input_dir)?;
+                    verifier::print_verification_summary(&results);
+                }
+                TransformCommands::Compare { original_dir, comparison_dir, output_dir } => {
+                    converter::compare_export_events(original_dir, comparison_dir, output_dir)?;
+                }
+                TransformCommands::CheckForDuplicates { input_dir, output_dir } => {
+                    converter::check_for_duplicate_insert_ids(input_dir, output_dir)?;
+                }
+                TransformCommands::FilterEvents { input_dir, output_dir, event_type, user_id, device_id, insert_id, uuid, start_time, end_time, invert } => {
+                    converter::filter_events(input_dir, output_dir, event_type.as_deref(), user_id.as_deref(), device_id.as_deref(), insert_id.as_deref(), uuid.as_deref(), start_time.as_deref(), end_time.as_deref(), *invert)?;
+                }
+                TransformCommands::CleanDifferences { differences_dir } => {
+                    difference_cleaner::clean_property_name_differences(differences_dir)?;
+                }
+            }
         }
     }
 
