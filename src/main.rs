@@ -164,6 +164,17 @@ enum TransformCommands {
         #[arg(long)]
         differences_dir: PathBuf,
     },
+
+    /// Analyze duplicates based on insert_id, determine DupeTypes, and write results to JSON files
+    AnalyzeDuplicates {
+        /// Input directory containing exported JSON files
+        #[arg(long)]
+        input_dir: PathBuf,
+        
+        /// Output directory for dupe analysis files
+        #[arg(long, default_value = "./output/dupe-analysis-results")]
+        output_dir: PathBuf,
+    },
 }
 
 #[tokio::main]
@@ -230,6 +241,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 TransformCommands::CleanDifferences { differences_dir } => {
                     transform::difference_cleaner::clean_property_name_differences(differences_dir)?;
+                }
+                TransformCommands::AnalyzeDuplicates { input_dir, output_dir } => {
+                    transform::dupe_analyzer::analyze_duplicates_and_types(input_dir, output_dir)?;
                 }
             }
         }

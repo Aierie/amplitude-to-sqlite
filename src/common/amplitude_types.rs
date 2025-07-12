@@ -335,12 +335,28 @@ where
 
 /// Event structure from Amplitude Export API
 #[autoimpl(PartialEq ignore 
-    self.app,
-    self.client_upload_time,
-    self.processed_time,
-    self.server_received_time,
-    self.uuid,
-    self.user_properties
+    self.city,
+self.country,
+self.device_carrier,
+self.device_family,
+self.device_type,
+self.event_id,
+self.ip_address,
+self.os_name,
+self.os_version,
+self.platform,
+self.client_upload_time,
+self.processed_time,
+self.server_received_time,
+self.server_upload_time,
+self.user_properties,
+self.uuid,
+self.language,
+self.region,
+self.dma,
+self.data,
+self.start_version,
+self.version_name
 )]
 #[derive(Default, Serialize, Deserialize, Debug, Clone)]
 pub struct ExportEvent {
