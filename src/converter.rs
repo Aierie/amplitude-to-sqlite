@@ -829,6 +829,7 @@ fn events_are_identical(event1: &ExportEvent, event2: &ExportEvent) -> bool {
     event1.device_id == event2.device_id &&
     event1.event_time == event2.event_time &&
     event1.event_properties == event2.event_properties &&
+    // We may want to ignore user properties, since they don't matter too much
     event1.user_properties == event2.user_properties &&
     event1.groups == event2.groups &&
     event1.group_properties == event2.group_properties
