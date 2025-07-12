@@ -108,9 +108,9 @@ pub fn clean_comparison_result(comparison: &mut ComparisonResult) -> bool {
             // Check if the only difference is property names (same values, different keys)
             if has_property_name_differences(comparison_props, original_props) {
                 // Determine which event is later based on client_upload_time
-                if let (Ok(comparison_time), Ok(original_time)) = (
-                    parse_client_upload_time(&comparison.comparison_event.client_upload_time),
-                    parse_client_upload_time(&comparison.original_event.client_upload_time),
+                if let (Some(comparison_time), Some(original_time)) = (
+                    comparison.comparison_event.client_upload_time,
+                    comparison.original_event.client_upload_time,
                 ) {
                     if comparison_time > original_time {
                         // Use comparison event properties (later event)
@@ -224,21 +224,6 @@ fn has_property_name_differences(
     original_props: &Map<String, Value>,
 ) -> bool {
     difference_utils::has_property_name_differences(comparison_props, original_props)
-}
-
-/// Parse client_upload_time string into DateTime
-fn parse_client_upload_time(
-    time_str: &Option<String>,
-) -> Result<DateTime<Utc>, Box<dyn std::error::Error>> {
-    match time_str {
-        Some(time) => {
-            // Parse the format "2025-07-09 15:50:50.913000"
-            let dt =
-                DateTime::parse_from_str(&format!("{} +00:00", time), "%Y-%m-%d %H:%M:%S%.f %z")?;
-            Ok(dt.with_timezone(&Utc))
-        }
-        None => Err("No client_upload_time available".into()),
-    }
 }
 
 #[cfg(test)]
@@ -417,26 +402,18 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_client_upload_time() {
-        let time_str = Some("2025-07-09 15:50:50.913000".to_string());
-        let result = parse_client_upload_time(&time_str);
-        assert!(result.is_ok());
-
-        let dt = result.unwrap();
-        assert_eq!(dt.year(), 2025);
-        assert_eq!(dt.month(), 7);
-        assert_eq!(dt.day(), 9);
-        assert_eq!(dt.hour(), 15);
-        assert_eq!(dt.minute(), 50);
-        assert_eq!(dt.second(), 50);
-    }
-
-    #[test]
     fn test_clean_comparison_result() {
         // Create a mock comparison result with non-material differences
         let mut comparison = ComparisonResult {
             comparison_event: ExportEvent {
-                client_upload_time: Some("2025-07-09 15:50:50.913000".to_string()),
+                client_upload_time: Some(
+                    DateTime::parse_from_str(
+                        "2025-07-09 15:50:50.913000 +00:00",
+                        "%Y-%m-%d %H:%M:%S%.f %z",
+                    )
+                    .unwrap()
+                    .with_timezone(&Utc),
+                ),
                 ..Default::default()
             },
             differences: Differences {
@@ -474,7 +451,14 @@ mod tests {
             },
             insert_id: "test".to_string(),
             original_event: ExportEvent {
-                client_upload_time: Some("2025-06-30 07:56:20.621000".to_string()),
+                client_upload_time: Some(
+                    DateTime::parse_from_str(
+                        "2025-06-30 07:56:20.621000 +00:00",
+                        "%Y-%m-%d %H:%M:%S%.f %z",
+                    )
+                    .unwrap()
+                    .with_timezone(&Utc),
+                ),
                 ..Default::default()
             },
         };

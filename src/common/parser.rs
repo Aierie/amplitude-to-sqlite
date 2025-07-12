@@ -64,8 +64,8 @@ mod tests {
         let test_file = test_dir.path().join("test.json");
         
         // Create a test JSON file with export events
-        let test_data = r#"{"$insert_id":"test-1","event_type":"test_event","event_time":"2025-07-01 16:34:54.837000","user_id":"test-user","device_id":"test-device","event_properties":{},"user_properties":{},"groups":{},"group_properties":{},"uuid":"test-uuid-1"}
-{"$insert_id":"test-2","event_type":"test_event_2","event_time":"2025-07-01 16:34:55.837000","user_id":"test-user-2","device_id":"test-device-2","event_properties":{},"user_properties":{},"groups":{},"group_properties":{},"uuid":"test-uuid-2"}"#;
+        let test_data = r#"{"$insert_id":"test-1","event_type":"test_event","event_time":"2025-07-01 16:34:54.837000","client_event_time":"2025-07-01 16:34:54.837000","client_upload_time":"2025-07-01 16:34:55.837000","server_received_time":"2025-07-01 16:34:56.837000","server_upload_time":"2025-07-01 16:34:57.837000","user_id":"test-user","device_id":"test-device","event_properties":{},"user_properties":{},"groups":{},"group_properties":{},"uuid":"test-uuid-1"}
+{"$insert_id":"test-2","event_type":"test_event_2","event_time":"2025-07-01 16:34:55.837000","client_event_time":"2025-07-01 16:34:55.837000","client_upload_time":"2025-07-01 16:34:56.837000","server_received_time":"2025-07-01 16:34:57.837000","server_upload_time":"2025-07-01 16:34:58.837000","user_id":"test-user-2","device_id":"test-device-2","event_properties":{},"user_properties":{},"groups":{},"group_properties":{},"uuid":"test-uuid-2"}"#;
         
         let mut file = File::create(&test_file).unwrap();
         file.write_all(test_data.as_bytes()).unwrap();
@@ -92,8 +92,8 @@ mod tests {
         let root_file = test_dir.path().join("root.json");
         let subdir_file = subdir.join("subdir.json");
         
-        let root_data = r#"{"$insert_id":"root-1","event_type":"root_event","event_time":"2025-07-01 16:34:54.837000","user_id":"root-user","device_id":"root-device","event_properties":{},"user_properties":{},"groups":{},"group_properties":{},"uuid":"root-uuid-1"}"#;
-        let subdir_data = r#"{"$insert_id":"subdir-1","event_type":"subdir_event","event_time":"2025-07-01 16:34:55.837000","user_id":"subdir-user","device_id":"subdir-device","event_properties":{},"user_properties":{},"groups":{},"group_properties":{},"uuid":"subdir-uuid-1"}"#;
+        let root_data = r#"{"$insert_id":"root-1","event_type":"root_event","event_time":"2025-07-01 16:34:54.837000","client_event_time":"2025-07-01 16:34:54.837000","client_upload_time":"2025-07-01 16:34:55.837000","server_received_time":"2025-07-01 16:34:56.837000","server_upload_time":"2025-07-01 16:34:57.837000","user_id":"root-user","device_id":"root-device","event_properties":{},"user_properties":{},"groups":{},"group_properties":{},"uuid":"root-uuid-1"}"#;
+        let subdir_data = r#"{"$insert_id":"subdir-1","event_type":"subdir_event","event_time":"2025-07-01 16:34:55.837000","client_event_time":"2025-07-01 16:34:55.837000","client_upload_time":"2025-07-01 16:34:56.837000","server_received_time":"2025-07-01 16:34:57.837000","server_upload_time":"2025-07-01 16:34:58.837000","user_id":"subdir-user","device_id":"subdir-device","event_properties":{},"user_properties":{},"groups":{},"group_properties":{},"uuid":"subdir-uuid-1"}"#;
         
         let mut root_file_handle = File::create(&root_file).unwrap();
         root_file_handle.write_all(root_data.as_bytes()).unwrap();
@@ -135,10 +135,10 @@ mod tests {
         export_event.app = Some(67890);
         export_event.amplitude_id = Some(11111);
         export_event.event_id = Some(22222);
-        export_event.client_event_time = Some("2025-07-01 16:34:54.837000".to_string());
-        export_event.client_upload_time = Some("2025-07-01 16:34:55.837000".to_string());
-        export_event.server_received_time = Some("2025-07-01 16:34:56.837000".to_string());
-        export_event.server_upload_time = Some("2025-07-01 16:34:57.837000".to_string());
+        export_event.client_event_time = Some(chrono::DateTime::parse_from_str("2025-07-01 16:34:54.837000 +00:00", "%Y-%m-%d %H:%M:%S%.f %z").unwrap().with_timezone(&chrono::Utc));
+        export_event.client_upload_time = Some(chrono::DateTime::parse_from_str("2025-07-01 16:34:55.837000 +00:00", "%Y-%m-%d %H:%M:%S%.f %z").unwrap().with_timezone(&chrono::Utc));
+        export_event.server_received_time = Some(chrono::DateTime::parse_from_str("2025-07-01 16:34:56.837000 +00:00", "%Y-%m-%d %H:%M:%S%.f %z").unwrap().with_timezone(&chrono::Utc));
+        export_event.server_upload_time = Some(chrono::DateTime::parse_from_str("2025-07-01 16:34:57.837000 +00:00", "%Y-%m-%d %H:%M:%S%.f %z").unwrap().with_timezone(&chrono::Utc));
         export_event.processed_time = Some("2025-07-01 16:34:58.837000".to_string());
         
         let batch_event = export_event.to_batch_event().unwrap();

@@ -303,7 +303,7 @@ pub struct SilencedDeviceIDError {
 }
 
 /// Custom deserializer for export API time format
-fn deserialize_export_time<'de, D>(deserializer: D) -> Result<Option<DateTime<Utc>>, D::Error>
+pub fn deserialize_amplitude_timestamp<'de, D>(deserializer: D) -> Result<Option<DateTime<Utc>>, D::Error>
 where
     D: Deserializer<'de>,
 {
@@ -319,7 +319,7 @@ where
 }
 
 /// Custom serializer for export API time format
-fn serialize_export_time<S>(time: &Option<DateTime<Utc>>, serializer: S) -> Result<S::Ok, S::Error>
+pub fn serialize_amplitude_timestamp<S>(time: &Option<DateTime<Utc>>, serializer: S) -> Result<S::Ok, S::Error>
 where
     S: serde::Serializer,
 {
@@ -347,8 +347,16 @@ pub struct ExportEvent {
     pub amplitude_id: Option<i64>,
     pub app: Option<i64>,
     pub city: Option<String>,
-    pub client_event_time: Option<String>,
-    pub client_upload_time: Option<String>,
+    #[serde(
+        deserialize_with = "deserialize_amplitude_timestamp",
+        serialize_with = "serialize_amplitude_timestamp"
+    )]
+    pub client_event_time: Option<DateTime<Utc>>,
+    #[serde(
+        deserialize_with = "deserialize_amplitude_timestamp",
+        serialize_with = "serialize_amplitude_timestamp"
+    )]
+    pub client_upload_time: Option<DateTime<Utc>>,
     pub country: Option<String>,
     pub data: Option<HashMap<String, Value>>,
     pub data_type: Option<String>,
@@ -363,8 +371,8 @@ pub struct ExportEvent {
     pub event_id: Option<i64>,
     pub event_properties: Option<HashMap<String, Value>>,
     #[serde(
-        deserialize_with = "deserialize_export_time",
-        serialize_with = "serialize_export_time"
+        deserialize_with = "deserialize_amplitude_timestamp",
+        serialize_with = "serialize_amplitude_timestamp"
     )]
     pub event_time: Option<DateTime<Utc>>,
     pub event_type: Option<String>,
@@ -387,8 +395,16 @@ pub struct ExportEvent {
     pub processed_time: Option<String>,
     pub region: Option<String>,
     pub sample_rate: Option<Value>,
-    pub server_received_time: Option<String>,
-    pub server_upload_time: Option<String>,
+    #[serde(
+        deserialize_with = "deserialize_amplitude_timestamp",
+        serialize_with = "serialize_amplitude_timestamp"
+    )]
+    pub server_received_time: Option<DateTime<Utc>>,
+    #[serde(
+        deserialize_with = "deserialize_amplitude_timestamp",
+        serialize_with = "serialize_amplitude_timestamp"
+    )]
+    pub server_upload_time: Option<DateTime<Utc>>,
     pub session_id: Option<i64>,
     pub source_id: Option<Value>,
     pub start_version: Option<Value>,
