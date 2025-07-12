@@ -1,5 +1,5 @@
-use crate::amplitude_sdk::AmplitudeClient;
-use crate::config::AmplitudeProjectSecrets;
+use crate::common::amplitude_sdk::AmplitudeClient;
+use crate::config::config::AmplitudeProjectSecrets;
 use chrono::{DateTime, Utc};
 use std::fs::{self, File};
 use std::io::{self, BufReader, BufWriter};

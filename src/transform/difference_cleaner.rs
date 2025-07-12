@@ -1,4 +1,4 @@
-use crate::amplitude_types::ExportEvent;
+use crate::common::amplitude_types::ExportEvent;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};

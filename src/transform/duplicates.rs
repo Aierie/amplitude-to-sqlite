@@ -1,5 +1,5 @@
-use crate::amplitude_types::ExportEvent;
-use crate::parser;
+use crate::common::amplitude_types::ExportEvent;
+use crate::common::parser;
 use std::collections::HashMap;
 use std::fs::{self, File};
 

@@ -1,5 +1,5 @@
-use crate::amplitude_types::{BatchUploadRequest, BatchUploadResponse, Event};
-use crate::config::AmplitudeProjectSecrets;
+use crate::common::amplitude_types::{BatchUploadRequest, BatchUploadResponse, Event};
+use crate::config::config::AmplitudeProjectSecrets;
 use chrono::{DateTime, Utc};
 use reqwest::StatusCode;
 use std::error::Error;

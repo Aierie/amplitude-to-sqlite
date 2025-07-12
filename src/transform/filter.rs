@@ -1,5 +1,5 @@
-use crate::amplitude_types::{ExportEvent, ExportEventFilter, MultiCriteriaFilter};
-use crate::parser;
+use crate::common::amplitude_types::{ExportEvent, ExportEventFilter, MultiCriteriaFilter};
+use crate::common::parser;
 use chrono::{DateTime, Utc};
 use std::fs::{self, File};
 use std::io::Write;
@@ -144,6 +144,6 @@ pub fn filter_events_uuid_deduplication(
     input_dir: &std::path::Path,
     output_dir: &std::path::Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut filter = crate::amplitude_types::UUIDDeduplicationFilter::new();
+    let mut filter = crate::common::amplitude_types::UUIDDeduplicationFilter::new();
     filter_events_with_filter(input_dir, output_dir, &mut filter)
 } 

@@ -1,4 +1,4 @@
-use crate::amplitude_types::ExportEvent;
+use crate::common::amplitude_types::ExportEvent;
 
 use std::fs::{self, File};
 use std::io::{self, BufRead, BufReader};

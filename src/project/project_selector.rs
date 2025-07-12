@@ -1,4 +1,4 @@
-use crate::config::{AmplitudeProjectSecrets, MultiProjectConfig};
+use crate::config::config::{AmplitudeProjectSecrets, MultiProjectConfig};
 use dialoguer::{Select, Input};
 
 pub struct ProjectSelector {

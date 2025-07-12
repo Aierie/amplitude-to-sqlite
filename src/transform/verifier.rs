@@ -1,4 +1,4 @@
-use crate::amplitude_types::ExportEvent;
+use crate::common::amplitude_types::ExportEvent;
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};

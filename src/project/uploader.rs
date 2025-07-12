@@ -1,6 +1,6 @@
-use crate::amplitude_sdk::AmplitudeClient;
-use crate::config::AmplitudeProjectSecrets;
-use crate::parser;
+use crate::common::amplitude_sdk::AmplitudeClient;
+use crate::config::config::AmplitudeProjectSecrets;
+use crate::common::parser;
 use std::fs::File;
 use tokio::time::{sleep, Duration};
 
@@ -39,7 +39,7 @@ pub async fn process_and_upload_events(
     println!("Sorted events by timestamp");
     
     // Group events by user_id (or device_id if user_id is None)
-    let mut user_events: std::collections::HashMap<String, Vec<crate::amplitude_types::Event>> = std::collections::HashMap::new();
+    let mut user_events: std::collections::HashMap<String, Vec<crate::common::amplitude_types::Event>> = std::collections::HashMap::new();
     
     for event in events {
         let key = event.user_id.as_ref()

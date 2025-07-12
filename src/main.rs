@@ -1,18 +1,10 @@
 use clap::{arg, command, Parser, Subcommand};
 use std::path::PathBuf;
 
-mod amplitude_types;
-mod amplitude_sdk;
+mod common;
 mod config;
-mod verifier;
-mod project_selector;
-mod difference_cleaner;
-mod exporter;
-mod uploader;
-mod compare;
-mod duplicates;
-mod filter;
-mod parser;
+mod project;
+mod transform;
 
 #[derive(Parser)]
 #[command(name = "amplitude-cli")]
@@ -180,12 +172,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     match &cli.command {
         Commands::Init { config_path } => {
-            config::MultiProjectConfig::create_sample_config(config_path)?;
+            config::config::MultiProjectConfig::create_sample_config(config_path)?;
         }
         Commands::Project { subcommand } => {
             match subcommand {
                 ProjectCommands::List => {
-                    let selector = project_selector::ProjectSelector::new()?;
+                    let selector = project::project_selector::ProjectSelector::new()?;
                     let projects = selector.list_projects();
                     
                     if projects.is_empty() {
@@ -198,25 +190,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
                 ProjectCommands::Add => {
-                    let mut selector = project_selector::ProjectSelector::new()?;
+                    let mut selector = project::project_selector::ProjectSelector::new()?;
                     selector.add_project_interactive()?;
                     selector.save_config(None)?;
                 }
                 ProjectCommands::Export { start_date, end_date, output_dir, project } => {
                     // Select project first
-                    let selector = project_selector::ProjectSelector::new()?;
+                    let selector = project::project_selector::ProjectSelector::new()?;
                     let project_config = selector.select_project(project.as_deref())?;
                     
                     // Call the core export function with the selected project config
-                    exporter::export_amplitude_data(start_date, end_date, output_dir, project_config).await?;
+                    project::exporter::export_amplitude_data(start_date, end_date, output_dir, project_config).await?;
                 }
                 ProjectCommands::Upload { input_dir, batch_size: _, project } => {
                     // Select project first
-                    let selector = project_selector::ProjectSelector::new()?;
+                    let selector = project::project_selector::ProjectSelector::new()?;
                     let project_config = selector.select_project(project.as_deref())?;
                     
                     // Call the core upload function with the selected project config
-                    uploader::process_and_upload_events(input_dir, project_config).await?;
+                    project::uploader::process_and_upload_events(input_dir, project_config).await?;
                 }
             }
         }
@@ -224,20 +216,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             match subcommand {
                 TransformCommands::VerifySerde { input_dir } => {
                     println!("Verifying JSON files in: {}", input_dir.display());
-                    let results = verifier::verify_directory(input_dir)?;
-                    verifier::print_verification_summary(&results);
+                    let results = transform::verifier::verify_directory(input_dir)?;
+                    transform::verifier::print_verification_summary(&results);
                 }
                 TransformCommands::Compare { original_dir, comparison_dir, output_dir } => {
-                    compare::compare_export_events(original_dir, comparison_dir, output_dir)?;
+                    transform::compare::compare_export_events(original_dir, comparison_dir, output_dir)?;
                 }
                 TransformCommands::CheckForDuplicates { input_dir, output_dir } => {
-                    duplicates::check_for_duplicate_insert_ids(input_dir, output_dir)?;
+                    transform::duplicates::check_for_duplicate_insert_ids(input_dir, output_dir)?;
                 }
                 TransformCommands::FilterEvents { input_dir, output_dir, event_type, user_id, device_id, insert_id, uuid, start_time, end_time, invert } => {
-                    filter::filter_events(input_dir, output_dir, event_type.as_deref(), user_id.as_deref(), device_id.as_deref(), insert_id.as_deref(), uuid.as_deref(), start_time.as_deref(), end_time.as_deref(), *invert)?;
+                    transform::filter::filter_events(input_dir, output_dir, event_type.as_deref(), user_id.as_deref(), device_id.as_deref(), insert_id.as_deref(), uuid.as_deref(), start_time.as_deref(), end_time.as_deref(), *invert)?;
                 }
                 TransformCommands::CleanDifferences { differences_dir } => {
-                    difference_cleaner::clean_property_name_differences(differences_dir)?;
+                    transform::difference_cleaner::clean_property_name_differences(differences_dir)?;
                 }
             }
         }
