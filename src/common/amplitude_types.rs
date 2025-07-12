@@ -1,4 +1,5 @@
 use chrono::{DateTime, Utc};
+use impl_tools::autoimpl;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -333,7 +334,15 @@ where
 }
 
 /// Event structure from Amplitude Export API
-#[derive(Debug, Serialize, Deserialize, Default, Clone)]
+#[autoimpl(PartialEq ignore 
+    self.app,
+    self.client_upload_time,
+    self.processed_time,
+    self.server_received_time,
+    self.uuid,
+    self.user_properties
+)]
+#[derive(Default, Serialize, Deserialize, Debug, Clone)]
 pub struct ExportEvent {
     #[serde(rename = "$insert_id")]
     pub insert_id: Option<String>,
@@ -1067,5 +1076,58 @@ mod tests {
         let (total_non_uuid, unique_ids) = filter.get_stats();
         assert_eq!(total_non_uuid, 3); // non_uuid_event1, non_uuid_event2, non_uuid_event3
         assert_eq!(unique_ids, 2); // "non-uuid-id-1", "non-uuid-id-2"
+    }
+
+    #[test]
+    fn test_export_event_partial_eq_ignores_specified_fields() {
+        // Create two ExportEvent instances that are identical except for the fields
+        // that should be ignored by PartialEq
+        let base_event = ExportEvent {
+            insert_id: Some("test-insert-id".to_string()),
+            event_type: Some("test_event".to_string()),
+            user_id: Some("test_user".to_string()),
+            device_id: Some("test_device".to_string()),
+            event_time: Some(DateTime::parse_from_rfc3339("2023-01-01T00:00:00Z").unwrap().with_timezone(&Utc)),
+            event_properties: Some({
+                let mut map = HashMap::new();
+                map.insert("key1".to_string(), Value::String("value1".to_string()));
+                map
+            }),
+            ..Default::default()
+        };
+
+        // Create a modified event with different values for the ignored fields
+        let mut modified_event = base_event.clone();
+        modified_event.app = Some(999); // Different app ID
+        modified_event.client_upload_time = Some(DateTime::parse_from_rfc3339("2023-01-02T00:00:00Z").unwrap().with_timezone(&Utc)); // Different upload time
+        modified_event.processed_time = Some("2023-01-02T00:00:00Z".to_string()); // Different processed time
+        modified_event.server_received_time = Some(DateTime::parse_from_rfc3339("2023-01-03T00:00:00Z").unwrap().with_timezone(&Utc)); // Different server time
+        modified_event.uuid = Some("different-uuid".to_string()); // Different UUID
+        modified_event.user_properties = Some({
+            let mut map = HashMap::new();
+            map.insert("different_key".to_string(), Value::String("different_value".to_string()));
+            map
+        }); // Different user properties
+
+        // The events should be equal despite the differences in ignored fields
+        assert_eq!(base_event, modified_event, "ExportEvent instances should be equal when only ignored fields differ");
+
+        // Now test that changing a non-ignored field makes them unequal
+        let mut different_event = base_event.clone();
+        different_event.event_type = Some("different_event".to_string()); // Change a non-ignored field
+        
+        assert_ne!(base_event, different_event, "ExportEvent instances should be unequal when non-ignored fields differ");
+
+        // Test that changing insert_id (a non-ignored field) makes them unequal
+        let mut different_insert_id = base_event.clone();
+        different_insert_id.insert_id = Some("different-insert-id".to_string());
+        
+        assert_ne!(base_event, different_insert_id, "ExportEvent instances should be unequal when insert_id differs");
+
+        // Test that changing user_id (a non-ignored field) makes them unequal
+        let mut different_user_id = base_event.clone();
+        different_user_id.user_id = Some("different_user".to_string());
+        
+        assert_ne!(base_event, different_user_id, "ExportEvent instances should be unequal when user_id differs");
     }
 }
