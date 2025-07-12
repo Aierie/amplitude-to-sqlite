@@ -201,7 +201,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             verifier::print_verification_summary(&results);
         }
         Commands::Upload { input_dir, batch_size, project } => {
-            converter::process_and_upload_events_with_project(input_dir, project.as_deref()).await?;
+            // Select project first
+            let selector = project_selector::ProjectSelector::new()?;
+            let project_config = selector.select_project(project.as_deref())?;
+            
+            // Call the core upload function with the selected project config
+            converter::process_and_upload_events(input_dir, project_config).await?;
         }
 
         Commands::Compare { original_dir, comparison_dir, output_dir } => {

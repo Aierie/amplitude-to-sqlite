@@ -1,6 +1,6 @@
 use crate::amplitude_sdk::AmplitudeClient;
 use crate::amplitude_types::{ExportEvent, ExportEventFilter, MultiCriteriaFilter};
-use crate::project_selector::ProjectSelector;
+
 
 use chrono::{DateTime, Utc};
 use flate2::read::GzDecoder;
@@ -259,18 +259,14 @@ fn write_parsed_items_to_sqlite<P: AsRef<Path>>(
     Ok(())
 }
 
-/// Process JSON files and upload events via batch API with project selection
-pub async fn process_and_upload_events_with_project(
+
+
+/// Process JSON files and upload events via batch API using a specific project configuration
+pub async fn process_and_upload_events(
     input_dir: &std::path::Path,
-    project_name: Option<&str>,
+    project_config: &crate::config::AmplitudeProjectSecrets,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // Select project
-    let selector = ProjectSelector::new()?;
-    let project_config = selector.select_project(project_name)?;
-    
-    println!("Using project configuration");
-    
-    // Create client with selected project config
+    // Create client with provided project config
     let client = AmplitudeClient::from_project_config(project_config);
     
     // Parse all ExportEvents from JSON files
