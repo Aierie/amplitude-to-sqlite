@@ -8,6 +8,7 @@ mod config;
 mod verifier;
 mod project_selector;
 mod difference_cleaner;
+mod exporter;
 
 #[derive(Parser)]
 #[command(name = "amplitude-cli")]
@@ -201,7 +202,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     match &cli.command {
         Commands::Export { start_date, end_date, output_dir, project } => {
-            converter::export_amplitude_data_with_project(start_date, end_date, output_dir, project.as_deref()).await?;
+            exporter::export_amplitude_data_with_project(start_date, end_date, output_dir, project.as_deref()).await?;
         }
         Commands::Convert { input_dir, output_db } => {
             converter::convert_json_to_sqlite(input_dir, output_db)?;
