@@ -14,6 +14,7 @@ impl ProjectSelector {
     /// Select a project interactively or use the provided project name
     pub fn select_project(&self, project_name: Option<&str>) -> Result<&AmplitudeProjectSecrets, Box<dyn std::error::Error>> {
         if let Some(name) = project_name {
+            println!("Using project configuration: {}", name);
             // Use the specified project name
             self.config.get_project(name)
                 .ok_or_else(|| format!("Project '{}' not found in configuration", name).into())
@@ -44,6 +45,7 @@ impl ProjectSelector {
             .interact()?;
 
         let selected_project = projects[selection];
+        println!("Using project configuration: {}", projects[selection]);
         self.config.get_project(selected_project)
             .ok_or_else(|| "Failed to get selected project configuration".into())
     }

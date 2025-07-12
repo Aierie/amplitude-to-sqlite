@@ -1,24 +1,20 @@
 use crate::amplitude_sdk::AmplitudeClient;
-use crate::project_selector::ProjectSelector;
+use crate::config::AmplitudeProjectSecrets;
 use chrono::{DateTime, Utc};
 use std::fs::{self, File};
 use std::io::{self, BufReader, BufWriter};
 use std::path::Path;
 use zip::ZipArchive;
 
-/// Export events from Amplitude for a given date range with project selection
-pub async fn export_amplitude_data_with_project(
+
+
+/// Export events from Amplitude for a given date range using a specific project configuration
+pub async fn export_amplitude_data(
     start_date: &str,
     end_date: &str,
     output_dir: &std::path::Path,
-    project_name: Option<&str>,
+    project_config: &AmplitudeProjectSecrets,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // Select project
-    let selector = ProjectSelector::new()?;
-    let project_config = selector.select_project(project_name)?;
-    
-    println!("Using project configuration");
-    
     // Parse dates
     let start = DateTime::parse_from_rfc3339(&format!("{}T00:00:00Z", start_date))?.with_timezone(&Utc);
     let end = DateTime::parse_from_rfc3339(&format!("{}T23:00:00Z", end_date))?.with_timezone(&Utc);
@@ -33,7 +29,7 @@ pub async fn export_amplitude_data_with_project(
     // Create output directory
     fs::create_dir_all(output_dir)?;
     
-    // Create client with selected project config
+    // Create client with provided project config
     let client = AmplitudeClient::from_project_config(project_config);
     let export_data = client.export_events(start, end).await?;
     

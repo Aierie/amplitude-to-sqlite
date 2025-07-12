@@ -181,7 +181,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     match &cli.command {
         Commands::Export { start_date, end_date, output_dir, project } => {
-            exporter::export_amplitude_data_with_project(start_date, end_date, output_dir, project.as_deref()).await?;
+            // Select project first
+            let selector = project_selector::ProjectSelector::new()?;
+            let project_config = selector.select_project(project.as_deref())?;
+            
+            
+            // Call the core export function with the selected project config
+            exporter::export_amplitude_data(start_date, end_date, output_dir, project_config).await?;
         }
         Commands::Convert { input_dir, output_db } => {
             converter::convert_json_to_sqlite(input_dir, output_db)?;
