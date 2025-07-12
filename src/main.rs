@@ -99,7 +99,7 @@ enum TransformCommands {
     },
 
     /// Verify round-trip deserialization of JSON files
-    VerifyDeserialization {
+    VerifySerde {
         /// Directory containing JSON files to verify
         #[arg(long)]
         input_dir: PathBuf,
@@ -230,10 +230,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Commands::Transform { subcommand } => {
             match subcommand {
+                // This can move out maybe
                 TransformCommands::Convert { input_dir, output_db } => {
                     converter::convert_json_to_sqlite(input_dir, output_db)?;
                 }
-                TransformCommands::VerifyDeserialization { input_dir } => {
+                TransformCommands::VerifySerde { input_dir } => {
                     println!("Verifying JSON files in: {}", input_dir.display());
                     let results = verifier::verify_directory(input_dir)?;
                     verifier::print_verification_summary(&results);
