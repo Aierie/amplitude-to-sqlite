@@ -17,21 +17,67 @@ pub enum DupeType {
 impl DupeType {
     pub fn resolution(self) -> DupeResolution {
         match self {
-            DupeType::PreOrderDropCompletedMistake(items) => DupeResolution::KeepMany(vec![
-                // there should only be 2
-                // one for the submitted
-                // one for the completed
-            ]),
-            DupeType::DropTypeChange(items)  | DupeType::PropertyNameChange(items) | DupeType::PropertyDropPriceChange(items) => {
+            DupeType::PreOrderDropCompletedMistake(items) => {
+                let mut submitted_event = None;
+                let mut completed_event = None;
+                
+                for item in items {
+                    if let Some(event_type) = &item.event_type {
+                        match event_type.as_str() {
+                            "Property Pre-Order Submitted" => submitted_event = Some(item.clone()),
+                            "Property Pre-Order Completed" => completed_event = Some(item.clone()),
+                            _ => {}
+                        }
+                    }
+                }
+                
+                let mut result_events = Vec::new();
+                
+                // Add the submitted event as-is
+                if let Some(submitted) = submitted_event {
+                    result_events.push(submitted);
+                }
+                
+                // Add the completed event with modified insert_id
+                if let Some(mut completed) = completed_event {
+                    // Modify the insert_id to reflect that this is a completed event
+                    if let Some(insert_id) = &completed.insert_id {
+                        // Replace "Submitted" with "Completed" in the insert_id
+                        let new_insert_id = insert_id.replace("Submitted", "Completed");
+                        completed.insert_id = Some(new_insert_id);
+                    }
+                    result_events.push(completed);
+                }
+                
+                DupeResolution::KeepMany(result_events)
+            }
+            DupeType::DropTypeChange(items)
+            | DupeType::PropertyNameChange(items)
+            | DupeType::PropertyDropPriceChange(items) => {
+                // Keep ALL properties from the event that had an earlier upload time
+                // EXCEPT event_properties, which should be from the second event
+                let (earlier_event, later_event) =
+                    if items[0].client_upload_time < items[1].client_upload_time {
+                        (&items[0], &items[1])
+                    } else {
+                        (&items[1], &items[0])
+                    };
+
+                // Create a new event with all properties from the earlier event, but event_properties from the later event
+                let mut merged_event = earlier_event.clone();
+                merged_event.event_properties = later_event.event_properties.clone();
+
+                DupeResolution::KeepOne(merged_event)
+            }
+            DupeType::TrueDuplicate(items) => {
                 let kept = items
                     .iter()
-                    .max_by(|v1, v2| {
+                    .min_by(|v1, v2| {
                         return v1.client_upload_time.cmp(&v2.client_upload_time);
                     })
                     .unwrap();
                 DupeResolution::KeepOne(kept.clone())
             }
-            DupeType::TrueDuplicate(items) => DupeResolution::KeepOne(items[0].clone()),
             DupeType::Unknown(_) => DupeResolution::Error(self),
             DupeType::UnknownPropDiff(_) => DupeResolution::Error(self),
             DupeType::TooMany(_) => DupeResolution::Error(self),
@@ -56,9 +102,9 @@ impl DupeType {
                 tentative = Some(v);
             } else {
                 let prev = tentative.clone().unwrap();
-                let mut current_col =  match prev {
+                let mut current_col = match prev {
                     DupeType::Multi(items, types) => types,
-                    _ => vec![prev]
+                    _ => vec![prev],
                 };
                 current_col.push(v);
                 tentative = Some(DupeType::Multi(events.clone(), current_col));
