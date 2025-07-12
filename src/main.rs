@@ -56,7 +56,7 @@ enum ProjectCommands {
         end_date: String,
         
         /// Output directory for exported files
-        #[arg(long, default_value = "./export")]
+        #[arg(long, default_value = "./output/export")]
         output_dir: PathBuf,
 
         /// Project name to use (if not specified, will prompt for selection)
@@ -100,7 +100,7 @@ enum TransformCommands {
         comparison_dir: PathBuf,
         
         /// Output directory for comparison results
-        #[arg(long, default_value = "./comparison-results")]
+        #[arg(long, default_value = "./output/comparison-results")]
         output_dir: PathBuf,
     },
 
@@ -111,7 +111,7 @@ enum TransformCommands {
         input_dir: PathBuf,
         
         /// Output directory for duplicate event files
-        #[arg(long, default_value = "./duplicate-results")]
+        #[arg(long, default_value = "./output/duplicate-results")]
         output_dir: PathBuf,
     },
 
@@ -122,7 +122,7 @@ enum TransformCommands {
         input_dir: PathBuf,
         
         /// Output directory for filtered results
-        #[arg(long, default_value = "./filter-results")]
+        #[arg(long, default_value = "./output/filter-results")]
         output_dir: PathBuf,
 
         /// Filter by event type (exact match)
