@@ -1,7 +1,7 @@
 use crate::amplitude_sdk::AmplitudeClient;
 use crate::amplitude_types::{ExportEvent, ExportEventFilter, MultiCriteriaFilter};
 use crate::project_selector::ProjectSelector;
-use crate::exporter;
+
 use chrono::{DateTime, Utc};
 use flate2::read::GzDecoder;
 use rusqlite::{params, Connection, Result};
@@ -458,105 +458,7 @@ fn parse_export_events_recursive(dir: &Path, events: &mut Vec<ExportEvent>) -> i
 }
 
 /// End-to-end round-trip: export from one project and upload to another
-pub async fn round_trip_e2e(
-    start_date: &str,
-    end_date: &str,
-    output_dir: &std::path::Path,
-    export_from: Option<&str>,
-    upload_to: Option<&str>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    // Load project selector
-    let selector = ProjectSelector::new()?;
-    
-    println!("Select project to export from");
-    // Select export project
-    let export_project = selector.select_project(export_from)?;
-    
-    // Get export project name
-    let export_project_name = if let Some(name) = export_from {
-        name
-    } else {
-        // Find the name of the selected project
-        let mut found_name = "unknown";
-        for (name, config) in &selector.config.projects {
-            if std::ptr::eq(config, export_project) {
-                found_name = name;
-                break;
-            }
-        }
-        found_name
-    };
 
-    println!("Exporting from: {}", export_project_name);
-    
-    // Select upload project (must be different from export project)
-    let upload_project_name = if let Some(upload_name) = upload_to {
-        if upload_name == export_project_name {
-            return Err("Export and upload projects must be different".into());
-        }
-        let _upload_project = selector.select_project(Some(upload_name))?;
-        upload_name
-    } else {
-        // Interactive selection - ensure it's different from export project
-        let projects: Vec<&String> = selector.config.list_projects();
-        let available_projects: Vec<&String> = projects
-            .iter()
-            .filter(|&&name| name != export_project_name)
-            .copied()
-            .collect();
-        
-        if available_projects.is_empty() {
-            return Err("No other projects available for upload. You need at least 2 projects configured.".into());
-        }
-        
-        println!("Available projects for upload (excluding '{}'):", export_project_name);
-        for (i, project_name) in available_projects.iter().enumerate() {
-            println!("  {}. {}", i + 1, project_name);
-        }
-        
-        let selection = dialoguer::Select::new()
-            .with_prompt("Select project to upload to")
-            .items(&available_projects)
-            .default(0)
-            .interact()?;
-        
-        available_projects[selection]
-    };
-    
-    // Display the selected options
-    println!("Round-trip E2E configuration:");
-    println!("  Export from: {}", export_project_name);
-    println!("  Upload to: {}", upload_project_name);
-    println!("  Date range: {} to {}", start_date, end_date);
-    println!("  Output directory: {}", output_dir.display());
-    
-    // Perform the export from the export_from project
-    println!("\nStarting export from project: {}", export_project_name);
-    let original_export_dir = output_dir.join("original");
-    exporter::export_amplitude_data_with_project(start_date, end_date, &original_export_dir, Some(export_project_name)).await?;
-    println!("Export completed successfully!");
-    
-    // Perform the upload to the upload_to project
-    println!("\nStarting upload to project: {}", upload_project_name);
-    process_and_upload_events_with_project(&original_export_dir, Some(upload_project_name)).await?;
-    println!("Upload completed successfully!");
-    
-    // Export from the upload_to project to a different directory for comparison
-    let comparison_dir = output_dir.join("comparison");
-    println!("\nStarting export from upload_to project for comparison: {}", upload_project_name);
-    exporter::export_amplitude_data_with_project(start_date, end_date, &comparison_dir, Some(upload_project_name)).await?;
-    println!("Comparison export completed successfully!");
-    
-    // Display final summary
-    println!("\nRound-trip E2E completed successfully!");
-    println!("  Exported from: {}", export_project_name);
-    println!("  Uploaded to: {}", upload_project_name);
-    println!("  Date range: {} to {}", start_date, end_date);
-    println!("  Original export directory: {}", original_export_dir.display());
-    println!("  Comparison export directory: {}", comparison_dir.display());
-    
-    Ok(())
-}
 
 /// Compare export events between original and comparison directories
 /// Creates a diff report keyed by insert_id and writes it to the filesystem
