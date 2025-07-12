@@ -104,67 +104,6 @@ enum TransformCommands {
         output_dir: PathBuf,
     },
 
-    /// Check for duplicate insert IDs across events in a directory
-    CheckForDuplicates {
-        /// Input directory containing exported JSON files
-        #[arg(long)]
-        input_dir: PathBuf,
-        
-        /// Output directory for duplicate event files
-        #[arg(long, default_value = "./output/duplicate-results")]
-        output_dir: PathBuf,
-    },
-
-    /// Filter events based on criteria and output remaining/removed items
-    FilterEvents {
-        /// Input directory containing exported JSON files
-        #[arg(long)]
-        input_dir: PathBuf,
-        
-        /// Output directory for filtered results
-        #[arg(long, default_value = "./output/filter-results")]
-        output_dir: PathBuf,
-
-        /// Filter by event type (exact match)
-        #[arg(long)]
-        event_type: Option<String>,
-
-        /// Filter by user ID (exact match)
-        #[arg(long)]
-        user_id: Option<String>,
-
-        /// Filter by device ID (exact match)
-        #[arg(long)]
-        device_id: Option<String>,
-
-        /// Filter by insert ID (exact match)
-        #[arg(long)]
-        insert_id: Option<String>,
-
-        /// Filter by UUID (exact match)
-        #[arg(long)]
-        uuid: Option<String>,
-
-        /// Start time filter (YYYY-MM-DD HH:MM:SS format)
-        #[arg(long)]
-        start_time: Option<String>,
-
-        /// End time filter (YYYY-MM-DD HH:MM:SS format)
-        #[arg(long)]
-        end_time: Option<String>,
-
-        /// Invert the filter (keep items that don't match criteria)
-        #[arg(long, default_value = "false")]
-        invert: bool,
-    },
-
-    /// Clean up differences in comparison results where property names are the only difference
-    CleanDifferences {
-        /// Directory containing comparison difference files
-        #[arg(long)]
-        differences_dir: PathBuf,
-    },
-
     /// Analyze duplicates based on insert_id, determine DupeTypes, and write results to JSON files
     AnalyzeDuplicates {
         /// Input directory containing exported JSON files
@@ -232,15 +171,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 TransformCommands::Compare { original_dir, comparison_dir, output_dir } => {
                     transform::compare::compare_export_events(original_dir, comparison_dir, output_dir)?;
-                }
-                TransformCommands::CheckForDuplicates { input_dir, output_dir } => {
-                    transform::duplicates::check_for_duplicate_insert_ids(input_dir, output_dir)?;
-                }
-                TransformCommands::FilterEvents { input_dir, output_dir, event_type, user_id, device_id, insert_id, uuid, start_time, end_time, invert } => {
-                    transform::filter::filter_events(input_dir, output_dir, event_type.as_deref(), user_id.as_deref(), device_id.as_deref(), insert_id.as_deref(), uuid.as_deref(), start_time.as_deref(), end_time.as_deref(), *invert)?;
-                }
-                TransformCommands::CleanDifferences { differences_dir } => {
-                    transform::difference_cleaner::clean_property_name_differences(differences_dir)?;
                 }
                 TransformCommands::AnalyzeDuplicates { input_dir, output_dir } => {
                     transform::dupe_analyzer::analyze_duplicates_and_types(input_dir, output_dir)?;

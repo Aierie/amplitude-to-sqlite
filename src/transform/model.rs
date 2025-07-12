@@ -1,4 +1,4 @@
-use crate::common::amplitude_types::{deserialize_amplitude_timestamp, ExportEvent};
+use crate::common::amplitude_types::ExportEvent;
 
 #[derive(Debug, Clone)]
 pub enum DupeType {
