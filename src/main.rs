@@ -3,13 +3,16 @@ use std::path::PathBuf;
 
 mod amplitude_types;
 mod amplitude_sdk;
-mod converter;
 mod config;
 mod verifier;
 mod project_selector;
 mod difference_cleaner;
 mod exporter;
 mod uploader;
+mod compare;
+mod duplicates;
+mod filter;
+mod parser;
 
 #[derive(Parser)]
 #[command(name = "amplitude-cli")]
@@ -87,17 +90,6 @@ enum ProjectCommands {
 
 #[derive(Subcommand)]
 enum TransformCommands {
-    /// Convert exported Amplitude JSON files to SQLite database
-    Convert {
-        /// Input directory containing exported JSON files
-        #[arg(long)]
-        input_dir: PathBuf,
-        
-        /// Output SQLite database file
-        #[arg(long, default_value = "amplitude_data.sqlite")]
-        output_db: PathBuf,
-    },
-
     /// Verify round-trip deserialization of JSON files
     VerifySerde {
         /// Directory containing JSON files to verify
@@ -230,23 +222,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Commands::Transform { subcommand } => {
             match subcommand {
-                // This can move out maybe
-                TransformCommands::Convert { input_dir, output_db } => {
-                    converter::convert_json_to_sqlite(input_dir, output_db)?;
-                }
                 TransformCommands::VerifySerde { input_dir } => {
                     println!("Verifying JSON files in: {}", input_dir.display());
                     let results = verifier::verify_directory(input_dir)?;
                     verifier::print_verification_summary(&results);
                 }
                 TransformCommands::Compare { original_dir, comparison_dir, output_dir } => {
-                    converter::compare_export_events(original_dir, comparison_dir, output_dir)?;
+                    compare::compare_export_events(original_dir, comparison_dir, output_dir)?;
                 }
                 TransformCommands::CheckForDuplicates { input_dir, output_dir } => {
-                    converter::check_for_duplicate_insert_ids(input_dir, output_dir)?;
+                    duplicates::check_for_duplicate_insert_ids(input_dir, output_dir)?;
                 }
                 TransformCommands::FilterEvents { input_dir, output_dir, event_type, user_id, device_id, insert_id, uuid, start_time, end_time, invert } => {
-                    converter::filter_events(input_dir, output_dir, event_type.as_deref(), user_id.as_deref(), device_id.as_deref(), insert_id.as_deref(), uuid.as_deref(), start_time.as_deref(), end_time.as_deref(), *invert)?;
+                    filter::filter_events(input_dir, output_dir, event_type.as_deref(), user_id.as_deref(), device_id.as_deref(), insert_id.as_deref(), uuid.as_deref(), start_time.as_deref(), end_time.as_deref(), *invert)?;
                 }
                 TransformCommands::CleanDifferences { differences_dir } => {
                     difference_cleaner::clean_property_name_differences(differences_dir)?;

@@ -1,9 +1,7 @@
 use crate::amplitude_sdk::AmplitudeClient;
-use crate::amplitude_types::ExportEvent;
 use crate::config::AmplitudeProjectSecrets;
-use std::fs::{self, File};
-use std::io::{self, BufRead, BufReader};
-use std::path::Path;
+use crate::parser;
+use std::fs::File;
 use tokio::time::{sleep, Duration};
 
 /// Process JSON files and upload events via batch API using a specific project configuration
@@ -15,7 +13,7 @@ pub async fn process_and_upload_events(
     let client = AmplitudeClient::from_project_config(project_config);
     
     // Parse all ExportEvents from JSON files
-    let export_events = parse_export_events_from_directory(input_dir)?;
+    let export_events = parser::parse_export_events_from_directory(input_dir)?;
     println!("Parsed {} export events", export_events.len());
     
     // Convert ExportEvents to Events
@@ -141,55 +139,4 @@ pub async fn process_and_upload_events(
     Ok(())
 }
 
-/// Parse all ExportEvents from JSON files in a directory (recursively)
-fn parse_export_events_from_directory(dir: &Path) -> io::Result<Vec<ExportEvent>> {
-    let mut events = Vec::new();
-    parse_export_events_recursive(dir, &mut events)?;
-    Ok(events)
-}
-
-/// Recursively parse ExportEvents from JSON files in a directory tree
-fn parse_export_events_recursive(dir: &Path, events: &mut Vec<ExportEvent>) -> io::Result<()> {
-    for entry in fs::read_dir(dir)? {
-        let entry = entry?;
-        let path = entry.path();
-
-        if path.is_dir() {
-            // Recursively process subdirectories
-            parse_export_events_recursive(&path, events)?;
-        } else if path.is_file() {
-            let file_name = path.file_name().unwrap().to_string_lossy().to_string();
-            
-            // Check if it's a JSON file
-            if let Some(extension) = path.extension() {
-                if extension != "json" {
-                    continue;
-                }
-            }
-            
-            println!("Processing file: {}", file_name);
-            let file = File::open(&path)?;
-            let reader = BufReader::new(file);
-
-            for (line_number, line_result) in reader.lines().enumerate() {
-                let line = line_result?;
-                let trimmed = line.trim();
-                if trimmed.is_empty() {
-                    continue;
-                }
-
-                let export_event: ExportEvent = match serde_json::from_str(trimmed) {
-                    Ok(event) => event,
-                    Err(e) => {
-                        eprintln!("Failed to parse JSON in {} line {}: {}", file_name, line_number + 1, e);
-                        continue;
-                    }
-                };
-
-                events.push(export_event);
-            }
-        }
-    }
-
-    Ok(())
-} 
+ 
