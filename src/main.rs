@@ -22,25 +22,6 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Export events from Amplitude to JSON files
-    Export {
-        /// Start date for export (YYYY-MM-DD format)
-        #[arg(long)]
-        start_date: String,
-        
-        /// End date for export (YYYY-MM-DD format)
-        #[arg(long)]
-        end_date: String,
-        
-        /// Output directory for exported files
-        #[arg(long, default_value = "./export")]
-        output_dir: PathBuf,
-
-        /// Project name to use (if not specified, will prompt for selection)
-        #[arg(long)]
-        project: Option<String>,
-    },
-    
     /// Convert exported Amplitude JSON files to SQLite database
     Convert {
         /// Input directory containing exported JSON files
@@ -65,23 +46,6 @@ enum Commands {
         #[arg(long)]
         input_dir: PathBuf,
     },
-
-    /// Process JSON files and upload events via batch API
-    Upload {
-        /// Input directory containing JSON files with ExportEvents
-        #[arg(long)]
-        input_dir: PathBuf,
-        
-        /// Batch size for uploads (default: 1000)
-        #[arg(long, default_value = "1000")]
-        batch_size: usize,
-
-        /// Project name to use (if not specified, will prompt for selection)
-        #[arg(long)]
-        project: Option<String>,
-    },
-
-
 
     /// Compare export events between original and comparison directories
     Compare {
@@ -152,8 +116,8 @@ enum Commands {
         invert: bool,
     },
 
-    /// Manage projects in configuration
-    Projects {
+    /// Manage projects and perform project-specific operations
+    Project {
         #[command(subcommand)]
         subcommand: ProjectCommands,
     },
@@ -171,9 +135,42 @@ enum ProjectCommands {
     /// List all configured projects
     List,
     
-    // TODO: I have not checked this manually
     /// Add a new project interactively
     Add,
+
+    /// Export events from Amplitude to JSON files
+    Export {
+        /// Start date for export (YYYY-MM-DD format)
+        #[arg(long)]
+        start_date: String,
+        
+        /// End date for export (YYYY-MM-DD format)
+        #[arg(long)]
+        end_date: String,
+        
+        /// Output directory for exported files
+        #[arg(long, default_value = "./export")]
+        output_dir: PathBuf,
+
+        /// Project name to use (if not specified, will prompt for selection)
+        #[arg(long)]
+        project: Option<String>,
+    },
+
+    /// Process JSON files and upload events via batch API
+    Upload {
+        /// Input directory containing JSON files with ExportEvents
+        #[arg(long)]
+        input_dir: PathBuf,
+        
+        /// Batch size for uploads (default: 1000)
+        #[arg(long, default_value = "1000")]
+        batch_size: usize,
+
+        /// Project name to use (if not specified, will prompt for selection)
+        #[arg(long)]
+        project: Option<String>,
+    },
 }
 
 #[tokio::main]
@@ -181,15 +178,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
     match &cli.command {
-        Commands::Export { start_date, end_date, output_dir, project } => {
-            // Select project first
-            let selector = project_selector::ProjectSelector::new()?;
-            let project_config = selector.select_project(project.as_deref())?;
-            
-            
-            // Call the core export function with the selected project config
-            exporter::export_amplitude_data(start_date, end_date, output_dir, project_config).await?;
-        }
         Commands::Convert { input_dir, output_db } => {
             converter::convert_json_to_sqlite(input_dir, output_db)?;
         }
@@ -201,15 +189,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let results = verifier::verify_directory(input_dir)?;
             verifier::print_verification_summary(&results);
         }
-        Commands::Upload { input_dir, batch_size, project } => {
-            // Select project first
-            let selector = project_selector::ProjectSelector::new()?;
-            let project_config = selector.select_project(project.as_deref())?;
-            
-            // Call the core upload function with the selected project config
-            uploader::process_and_upload_events(input_dir, project_config).await?;
-        }
-
         Commands::Compare { original_dir, comparison_dir, output_dir } => {
             converter::compare_export_events(original_dir, comparison_dir, output_dir)?;
         }
@@ -219,7 +198,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Commands::FilterEvents { input_dir, output_dir, event_type, user_id, device_id, insert_id, uuid, start_time, end_time, invert } => {
             converter::filter_events(input_dir, output_dir, event_type.as_deref(), user_id.as_deref(), device_id.as_deref(), insert_id.as_deref(), uuid.as_deref(), start_time.as_deref(), end_time.as_deref(), *invert)?;
         }
-        Commands::Projects { subcommand } => {
+        Commands::Project { subcommand } => {
             match subcommand {
                 ProjectCommands::List => {
                     let selector = project_selector::ProjectSelector::new()?;
@@ -238,6 +217,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let mut selector = project_selector::ProjectSelector::new()?;
                     selector.add_project_interactive()?;
                     selector.save_config(None)?;
+                }
+                ProjectCommands::Export { start_date, end_date, output_dir, project } => {
+                    // Select project first
+                    let selector = project_selector::ProjectSelector::new()?;
+                    let project_config = selector.select_project(project.as_deref())?;
+                    
+                    // Call the core export function with the selected project config
+                    exporter::export_amplitude_data(start_date, end_date, output_dir, project_config).await?;
+                }
+                ProjectCommands::Upload { input_dir, batch_size, project } => {
+                    // Select project first
+                    let selector = project_selector::ProjectSelector::new()?;
+                    let project_config = selector.select_project(project.as_deref())?;
+                    
+                    // Call the core upload function with the selected project config
+                    uploader::process_and_upload_events(input_dir, project_config).await?;
                 }
             }
         }
