@@ -17,12 +17,12 @@ pub enum Dupe {
 }
 
 impl Dupe {
-    pub fn resolution(self) -> DupeResolution {
+    pub fn resolution(self) -> DataCorrection {
         match self {
             Dupe::PreOrderDropCompletedMistake(items) => {
                 let mut submitted_event = None;
                 let mut completed_event = None;
-                
+
                 for item in items {
                     if let Some(event_type) = &item.event_type {
                         match event_type.as_str() {
@@ -32,26 +32,22 @@ impl Dupe {
                         }
                     }
                 }
-                
+
                 let mut result_events = Vec::new();
-                
+
                 // Add the submitted event as-is
                 if let Some(submitted) = submitted_event {
                     result_events.push(submitted);
                 }
-                
+
                 // Add the completed event with modified insert_id
-                if let Some(mut completed) = completed_event {
-                    // Modify the insert_id to reflect that this is a completed event
-                    if let Some(insert_id) = &completed.insert_id {
-                        // Replace "Submitted" with "Completed" in the insert_id
-                        let new_insert_id = insert_id.replace("Submitted", "Completed");
-                        completed.insert_id = Some(new_insert_id);
-                    }
+                if let Some(uncloned_completed) = completed_event {
+                    let mut completed = uncloned_completed.clone();
+                    completed.event_type = Some("Property Pre-Order Completed".to_string());
                     result_events.push(completed);
                 }
-                
-                DupeResolution::KeepMany(result_events)
+
+                DataCorrection::KeepMany(result_events)
             }
             Dupe::DropTypeChange(items)
             | Dupe::PropertyNameChange(items)
@@ -69,7 +65,7 @@ impl Dupe {
                 let mut merged_event = earlier_event.clone();
                 merged_event.event_properties = later_event.event_properties.clone();
 
-                DupeResolution::KeepOne(merged_event)
+                DataCorrection::KeepOne(merged_event)
             }
             Dupe::TrueDuplicate(items) => {
                 let kept = items
@@ -78,13 +74,13 @@ impl Dupe {
                         return v1.client_upload_time.cmp(&v2.client_upload_time);
                     })
                     .unwrap();
-                DupeResolution::KeepOne(kept.clone())
+                DataCorrection::KeepOne(kept.clone())
             }
-            Dupe::Unknown(_) => DupeResolution::Error(self),
-            Dupe::UnknownPropDiff(_) => DupeResolution::Error(self),
-            Dupe::TooMany(_) => DupeResolution::Error(self),
-            Dupe::EventPropsIncompatible(_) => DupeResolution::Error(self),
-            Dupe::Multi(_, _) => DupeResolution::Error(self),
+            Dupe::Unknown(_) => DataCorrection::Error(self),
+            Dupe::UnknownPropDiff(_) => DataCorrection::Error(self),
+            Dupe::TooMany(_) => DataCorrection::Error(self),
+            Dupe::EventPropsIncompatible(_) => DataCorrection::Error(self),
+            Dupe::Multi(_, _) => DataCorrection::Error(self),
         }
     }
 
@@ -195,7 +191,7 @@ impl Dupe {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum DupeResolution {
+pub enum DataCorrection {
     KeepOne(ExportEvent),
     KeepMany(Vec<ExportEvent>),
     Error(Dupe),

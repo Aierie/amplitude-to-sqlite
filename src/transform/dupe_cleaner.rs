@@ -1,6 +1,6 @@
 use crate::common::amplitude_types::ExportEvent;
 use crate::common::parser;
-use crate::transform::model::{Dupe, DupeResolution};
+use crate::transform::model::{Dupe, DataCorrection};
 use itertools::Itertools;
 use std::collections::HashMap;
 use std::fs::{self, File};
@@ -89,9 +89,9 @@ pub fn clean_duplicates_and_types(
                 dupe.resolution()
             })
             .flat_map(|r| match r {
-                DupeResolution::KeepOne(export_event) => vec![export_event],
-                DupeResolution::KeepMany(export_events) => export_events,
-                DupeResolution::Error(dupe) => panic!("Error. Please analyze"),
+                DataCorrection::KeepOne(export_event) => vec![export_event],
+                DataCorrection::KeepMany(export_events) => export_events,
+                DataCorrection::Error(dupe) => panic!("Error. Please analyze"),
             })
             .chunks(1000)
             .into_iter()
@@ -110,7 +110,7 @@ pub fn clean_duplicates_and_types(
         let mut created_dirs = HashMap::<String, bool>::new();
         let mut handle_resolution = |insert_id: &String,
                                      dupe_type: Dupe,
-                                     resolution: DupeResolution|
+                                     resolution: DataCorrection|
          -> Result<(), Box<dyn std::error::Error>> {
             let dupe_type_str = dupe_type.to_str();
             let type_dir = output_dir.join(&dupe_type_str);
