@@ -1,7 +1,9 @@
+use serde::{Deserialize, Serialize};
+
 use crate::common::amplitude_types::ExportEvent;
 
-#[derive(Debug, Clone)]
-pub enum DupeType {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum Dupe {
     PreOrderDropCompletedMistake(Vec<ExportEvent>),
     PropertyNameChange(Vec<ExportEvent>),
     PropertyDropPriceChange(Vec<ExportEvent>),
@@ -10,14 +12,14 @@ pub enum DupeType {
     UnknownPropDiff(Vec<ExportEvent>),
     Unknown(Vec<ExportEvent>),
     TooMany(Vec<ExportEvent>),
-    Multi(Vec<ExportEvent>, Vec<DupeType>),
+    Multi(Vec<ExportEvent>, Vec<Dupe>),
     EventPropsIncompatible(Vec<ExportEvent>),
 }
 
-impl DupeType {
+impl Dupe {
     pub fn resolution(self) -> DupeResolution {
         match self {
-            DupeType::PreOrderDropCompletedMistake(items) => {
+            Dupe::PreOrderDropCompletedMistake(items) => {
                 let mut submitted_event = None;
                 let mut completed_event = None;
                 
@@ -51,9 +53,9 @@ impl DupeType {
                 
                 DupeResolution::KeepMany(result_events)
             }
-            DupeType::DropTypeChange(items)
-            | DupeType::PropertyNameChange(items)
-            | DupeType::PropertyDropPriceChange(items) => {
+            Dupe::DropTypeChange(items)
+            | Dupe::PropertyNameChange(items)
+            | Dupe::PropertyDropPriceChange(items) => {
                 // Keep ALL properties from the event that had an earlier upload time
                 // EXCEPT event_properties, which should be from the second event
                 let (earlier_event, later_event) =
@@ -69,7 +71,7 @@ impl DupeType {
 
                 DupeResolution::KeepOne(merged_event)
             }
-            DupeType::TrueDuplicate(items) => {
+            Dupe::TrueDuplicate(items) => {
                 let kept = items
                     .iter()
                     .min_by(|v1, v2| {
@@ -78,17 +80,17 @@ impl DupeType {
                     .unwrap();
                 DupeResolution::KeepOne(kept.clone())
             }
-            DupeType::Unknown(_) => DupeResolution::Error(self),
-            DupeType::UnknownPropDiff(_) => DupeResolution::Error(self),
-            DupeType::TooMany(_) => DupeResolution::Error(self),
-            DupeType::EventPropsIncompatible(_) => DupeResolution::Error(self),
-            DupeType::Multi(_, _) => DupeResolution::Error(self),
+            Dupe::Unknown(_) => DupeResolution::Error(self),
+            Dupe::UnknownPropDiff(_) => DupeResolution::Error(self),
+            Dupe::TooMany(_) => DupeResolution::Error(self),
+            Dupe::EventPropsIncompatible(_) => DupeResolution::Error(self),
+            Dupe::Multi(_, _) => DupeResolution::Error(self),
         }
     }
 
     pub fn from_events(events: &Vec<ExportEvent>) -> Self {
         if events.len() > 2 {
-            return DupeType::TooMany(events.clone());
+            return Dupe::TooMany(events.clone());
         }
 
         // We skip diff checking if we have confirmed that this is truly a server-side event. It is expected
@@ -96,18 +98,18 @@ impl DupeType {
         // to take all the metadata of the first event, and the properties of the second event
         let mut skip_diff_check = false;
 
-        let mut tentative: Option<DupeType> = None;
+        let mut tentative: Option<Dupe> = None;
         let mut set_tentative = |v| {
             if tentative.is_none() {
                 tentative = Some(v);
             } else {
                 let prev = tentative.clone().unwrap();
                 let mut current_col = match prev {
-                    DupeType::Multi(items, types) => types,
+                    Dupe::Multi(items, types) => types,
                     _ => vec![prev],
                 };
                 current_col.push(v);
-                tentative = Some(DupeType::Multi(events.clone(), current_col));
+                tentative = Some(Dupe::Multi(events.clone(), current_col));
             }
         };
 
@@ -120,7 +122,7 @@ impl DupeType {
             // Therefore it only makes sense that we have significant diffs in various fields
             // Hence we should take BOTH the events, but modify the one with event name "completed"
             // to have an insert id that matches "completed"
-            set_tentative(DupeType::PreOrderDropCompletedMistake(events.clone()));
+            set_tentative(Dupe::PreOrderDropCompletedMistake(events.clone()));
             skip_diff_check = true;
         }
 
@@ -131,29 +133,29 @@ impl DupeType {
                 (Some(first_props), Some(second_props)) => {
                     // uuids only for client-side events
                     if uuid::Uuid::parse_str(&first.insert_id.unwrap().to_string()).is_ok() {
-                        set_tentative(DupeType::Unknown(events.clone()));
+                        set_tentative(Dupe::Unknown(events.clone()));
                     } else {
                         // These are server-sent events where we modified something before backfill added a duplicate
                         // so we should NOT care about properties that Amplitude added on
                         if first_props.get("Property") != second_props.get("Property") {
-                            set_tentative(DupeType::PropertyNameChange(events.clone()));
+                            set_tentative(Dupe::PropertyNameChange(events.clone()));
                             skip_diff_check = true;
                         }
 
                         if first_props.get("Drop Type") != second_props.get("Drop Type") {
-                            set_tentative(DupeType::DropTypeChange(events.clone()));
+                            set_tentative(Dupe::DropTypeChange(events.clone()));
                             skip_diff_check = true;
                         }
 
                         if first_props.get("Price per Share") != second_props.get("Price per Share")
                         {
-                            set_tentative(DupeType::PropertyDropPriceChange(events.clone()));
+                            set_tentative(Dupe::PropertyDropPriceChange(events.clone()));
                             skip_diff_check = true;
                         }
                     }
                 }
-                (None, Some(_)) => set_tentative(DupeType::EventPropsIncompatible(events.clone())),
-                (Some(_), None) => set_tentative(DupeType::EventPropsIncompatible(events.clone())),
+                (None, Some(_)) => set_tentative(Dupe::EventPropsIncompatible(events.clone())),
+                (Some(_), None) => set_tentative(Dupe::EventPropsIncompatible(events.clone())),
                 (None, None) => panic!("Impossible condition"),
             };
         }
@@ -162,40 +164,39 @@ impl DupeType {
             let first = events[0].clone();
             let second = events[1].clone();
             if first == second {
-                set_tentative(DupeType::TrueDuplicate(events.clone()));
+                set_tentative(Dupe::TrueDuplicate(events.clone()));
             } else {
-                set_tentative(DupeType::UnknownPropDiff(events.clone()));
+                set_tentative(Dupe::UnknownPropDiff(events.clone()));
             }
         }
 
         if tentative.is_some() {
             tentative.unwrap()
         } else {
-            DupeType::Unknown(events.clone())
+            Dupe::Unknown(events.clone())
         }
     }
 
     pub(crate) fn to_str(&self) -> String {
         match &self {
-            DupeType::PreOrderDropCompletedMistake(_) => "PreOrderDropCompletedMistake",
-            DupeType::PropertyNameChange(_) => "PropertyNameChange",
-            DupeType::DropTypeChange(_) => "DropTypeChange",
-            DupeType::PropertyDropPriceChange(_) => "PropertyDropPriceChange",
-            DupeType::TrueDuplicate(_) => "TrueDuplicate",
-            DupeType::Unknown(_) => "Unknown",
-            DupeType::TooMany(_) => "TooMany",
-            DupeType::Multi(_, _) => "Multi",
-            DupeType::EventPropsIncompatible(_) => "EventPropsIncompatible",
-            DupeType::UnknownPropDiff(export_events) => "UnknownPropDiff",
+            Dupe::PreOrderDropCompletedMistake(_) => "PreOrderDropCompletedMistake",
+            Dupe::PropertyNameChange(_) => "PropertyNameChange",
+            Dupe::DropTypeChange(_) => "DropTypeChange",
+            Dupe::PropertyDropPriceChange(_) => "PropertyDropPriceChange",
+            Dupe::TrueDuplicate(_) => "TrueDuplicate",
+            Dupe::Unknown(_) => "Unknown",
+            Dupe::TooMany(_) => "TooMany",
+            Dupe::Multi(_, _) => "Multi",
+            Dupe::EventPropsIncompatible(_) => "EventPropsIncompatible",
+            Dupe::UnknownPropDiff(export_events) => "UnknownPropDiff",
         }
         .to_string()
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum DupeResolution {
     KeepOne(ExportEvent),
-    KeepNone(ExportEvent),
     KeepMany(Vec<ExportEvent>),
-    Error(DupeType),
+    Error(Dupe),
 }
