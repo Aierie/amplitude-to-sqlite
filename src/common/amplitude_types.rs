@@ -334,6 +334,7 @@ where
 
 /// Event structure from Amplitude Export API
 #[autoimpl(PartialEq ignore 
+    self.app,
     self.city,
 self.country,
 self.device_carrier,
