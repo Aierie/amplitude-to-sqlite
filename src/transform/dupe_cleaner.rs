@@ -4,14 +4,23 @@ use crate::transform::model::{DupeResolution, DupeType};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fs::{self, File};
+use std::io::Write;
 
-/// Analyze duplicates based on insert_id, determine DupeTypes, and write results to JSON files
-pub fn analyze_duplicates_and_types(
+#[derive(Debug, Clone, Copy)]
+pub enum OutputMode {
+    Analyze,
+    Debug,
+    Full,
+}
+
+/// Clean duplicates based on insert_id, determine DupeTypes, and write results to JSON files
+pub fn clean_duplicates_and_types(
     input_dir: &std::path::Path,
     output_dir: &std::path::Path,
+    output_mode: OutputMode,
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!(
-        "Analyzing duplicates and determining DupeTypes in: {}",
+        "Cleaning duplicates and determining DupeTypes in: {}",
         input_dir.display()
     );
 
@@ -446,19 +455,180 @@ pub fn analyze_duplicates_and_types(
         consolidated_path.display()
     );
 
-    // Print summary to console
-    println!("\n=== Dupe Analysis Summary ===");
-    println!("Total events: {}", total_events);
-    println!("Duplicate insert IDs: {}", duplicates.len());
-    println!("\nDupe type breakdown:");
-    for (dupe_type, count) in &dupe_type_counts {
-        println!("  {}: {}", dupe_type, count);
-    }
+    // Handle different output modes
+    match output_mode {
+        OutputMode::Analyze => {
+            // Current logic - just print summary
+            println!("\n=== Dupe Analysis Summary ===");
+            println!("Total events: {}", total_events);
+            println!("Duplicate insert IDs: {}", duplicates.len());
+            println!("\nDupe type breakdown:");
+            for (dupe_type, count) in &dupe_type_counts {
+                println!("  {}: {}", dupe_type, count);
+            }
 
-    println!("\nOutput organized by DupeType in subdirectories:");
-    for dupe_type_str in dupe_type_groups.keys() {
-        let type_dir = output_dir.join(dupe_type_str);
-        println!("  {}: {}", dupe_type_str, type_dir.display());
+            println!("\nOutput organized by DupeType in subdirectories:");
+            for dupe_type_str in dupe_type_groups.keys() {
+                let type_dir = output_dir.join(dupe_type_str);
+                println!("  {}: {}", dupe_type_str, type_dir.display());
+            }
+        },
+        OutputMode::Debug => {
+            // Debug mode: include resolution processing
+            println!("\n=== Dupe Analysis Summary (Debug Mode) ===");
+            println!("Total events: {}", total_events);
+            println!("Duplicate insert IDs: {}", duplicates.len());
+            println!("\nDupe type breakdown:");
+            for (dupe_type, count) in &dupe_type_counts {
+                println!("  {}: {}", dupe_type, count);
+            }
+
+            // Process resolutions and create resolved events
+            let mut resolved_events = Vec::new();
+            let mut resolution_summary = HashMap::new();
+            
+            for (insert_id, analysis) in &dupe_analysis {
+                match &analysis.resolution {
+                    DupeResolution::KeepOne(event) => {
+                        resolved_events.push(event.clone());
+                        *resolution_summary.entry("KeepOne").or_insert(0) += 1;
+                    },
+                    DupeResolution::KeepMany(events) => {
+                        resolved_events.extend(events.clone());
+                        *resolution_summary.entry("KeepMany").or_insert(0) += events.len();
+                    },
+                    DupeResolution::KeepNone(_) => {
+                        *resolution_summary.entry("KeepNone").or_insert(0) += 1;
+                    },
+                    DupeResolution::Error(_) => {
+                        *resolution_summary.entry("Error").or_insert(0) += 1;
+                    },
+                }
+            }
+
+            println!("\nResolution summary:");
+            for (resolution_type, count) in &resolution_summary {
+                println!("  {}: {}", resolution_type, count);
+            }
+
+            // Write resolved events to a debug file
+            let debug_path = output_dir.join("debug_resolved_events.json");
+            let mut debug_file = File::create(&debug_path)?;
+            for event in &resolved_events {
+                serde_json::to_writer(&mut debug_file, &event)?;
+                writeln!(debug_file)?;
+            }
+            println!("Debug resolved events written to: {}", debug_path.display());
+
+            println!("\nOutput organized by DupeType in subdirectories:");
+            for dupe_type_str in dupe_type_groups.keys() {
+                let type_dir = output_dir.join(dupe_type_str);
+                println!("  {}: {}", dupe_type_str, type_dir.display());
+            }
+        },
+        OutputMode::Full => {
+            // Full mode: output ALL data including non-duplicates
+            println!("\n=== Full Export Mode ===");
+            println!("Total events: {}", total_events);
+            println!("Duplicate insert IDs: {}", duplicates.len());
+            println!("\nDupe type breakdown:");
+            for (dupe_type, count) in &dupe_type_counts {
+                println!("  {}: {}", dupe_type, count);
+            }
+
+            // Process resolutions for duplicates
+            let mut resolved_events = Vec::new();
+            let mut resolution_summary = HashMap::new();
+            
+            for (insert_id, analysis) in &dupe_analysis {
+                match &analysis.resolution {
+                    DupeResolution::KeepOne(event) => {
+                        resolved_events.push(event.clone());
+                        *resolution_summary.entry("KeepOne").or_insert(0) += 1;
+                    },
+                    DupeResolution::KeepMany(events) => {
+                        resolved_events.extend(events.clone());
+                        *resolution_summary.entry("KeepMany").or_insert(0) += events.len();
+                    },
+                    DupeResolution::KeepNone(_) => {
+                        *resolution_summary.entry("KeepNone").or_insert(0) += 1;
+                    },
+                    DupeResolution::Error(_) => {
+                        *resolution_summary.entry("Error").or_insert(0) += 1;
+                    },
+                }
+            }
+
+            println!("\nResolution summary:");
+            for (resolution_type, count) in &resolution_summary {
+                println!("  {}: {}", resolution_type, count);
+            }
+
+            // Create a map of resolved events by insert_id for easy lookup
+            let mut resolved_map: HashMap<String, ExportEvent> = HashMap::new();
+            for event in &resolved_events {
+                if let Some(insert_id) = &event.insert_id {
+                    resolved_map.insert(insert_id.clone(), event.clone());
+                }
+            }
+
+            // Re-parse all events to get the complete dataset
+            let all_events = parser::parse_export_events_from_directory(input_dir)?;
+            
+            // Create final events list: resolved duplicates + non-duplicates
+            let mut final_events = Vec::new();
+            let mut non_duplicate_count = 0;
+            
+            for event in all_events {
+                if let Some(insert_id) = &event.insert_id {
+                    if let Some(resolved_event) = resolved_map.get(insert_id) {
+                        // This is a duplicate that was resolved
+                        final_events.push(resolved_event.clone());
+                    } else {
+                        // This is a non-duplicate event
+                        final_events.push(event);
+                        non_duplicate_count += 1;
+                    }
+                } else {
+                    // Event without insert_id, keep as-is
+                    final_events.push(event);
+                    non_duplicate_count += 1;
+                }
+            }
+
+            println!("Non-duplicate events: {}", non_duplicate_count);
+            println!("Final events after resolution: {}", final_events.len());
+
+            // Write all events in Amplitude export format
+            let full_export_path = output_dir.join("full_export_events.json");
+            let mut full_export_file = File::create(&full_export_path)?;
+            for event in &final_events {
+                serde_json::to_writer(&mut full_export_file, &event)?;
+                writeln!(full_export_file)?;
+            }
+            println!("Full export written to: {}", full_export_path.display());
+
+            // Also write a summary of what was done
+            let full_summary_path = output_dir.join("full_export_summary.json");
+            let full_summary = serde_json::json!({
+                "total_original_events": total_events,
+                "duplicate_insert_ids_count": duplicates.len(),
+                "non_duplicate_events": non_duplicate_count,
+                "final_events_count": final_events.len(),
+                "dupe_type_counts": dupe_type_counts,
+                "resolution_summary": resolution_summary,
+                "duplicate_insert_ids": duplicates.keys().collect::<Vec<_>>()
+            });
+            let full_summary_file = File::create(&full_summary_path)?;
+            serde_json::to_writer_pretty(full_summary_file, &full_summary)?;
+            println!("Full export summary written to: {}", full_summary_path.display());
+
+            println!("\nOutput organized by DupeType in subdirectories:");
+            for dupe_type_str in dupe_type_groups.keys() {
+                let type_dir = output_dir.join(dupe_type_str);
+                println!("  {}: {}", dupe_type_str, type_dir.display());
+            }
+        }
     }
 
     println!("\nDupe analysis completed successfully!");
@@ -577,4 +747,26 @@ fn sanitize_filename(filename: &str) -> String {
             }
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_output_mode_enum() {
+        // Test that all output modes can be created and compared
+        assert!(matches!(OutputMode::Analyze, OutputMode::Analyze));
+        assert!(matches!(OutputMode::Debug, OutputMode::Debug));
+        assert!(matches!(OutputMode::Full, OutputMode::Full));
+    }
+
+    #[test]
+    fn test_sanitize_filename() {
+        assert_eq!(sanitize_filename("normal-name"), "normal-name");
+        assert_eq!(sanitize_filename("name with spaces"), "name_with_spaces");
+        assert_eq!(sanitize_filename("name@with#special$chars"), "name_with_special_chars");
+        assert_eq!(sanitize_filename("name/with\\path:chars"), "name_with_path_chars");
+    }
 }

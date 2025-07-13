@@ -104,8 +104,8 @@ enum TransformCommands {
         output_dir: PathBuf,
     },
 
-    /// Analyze duplicates based on insert_id, determine DupeTypes, and write results to JSON files
-    AnalyzeDuplicates {
+    /// Clean duplicates based on insert_id, determine DupeTypes, and write results to JSON files
+    CleanDuplicates {
         /// Input directory containing exported JSON files
         #[arg(long)]
         input_dir: PathBuf,
@@ -113,6 +113,10 @@ enum TransformCommands {
         /// Output directory for dupe analysis files
         #[arg(long, default_value = "./output/dupe-analysis-results")]
         output_dir: PathBuf,
+
+        /// Output mode: analyze (default), debug, or full
+        #[arg(long, default_value = "analyze")]
+        output_mode: String,
     },
 }
 
@@ -172,8 +176,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 TransformCommands::Compare { original_dir, comparison_dir, output_dir } => {
                     transform::compare::compare_export_events(original_dir, comparison_dir, output_dir)?;
                 }
-                TransformCommands::AnalyzeDuplicates { input_dir, output_dir } => {
-                    transform::dupe_analyzer::analyze_duplicates_and_types(input_dir, output_dir)?;
+                TransformCommands::CleanDuplicates { input_dir, output_dir, output_mode } => {
+                    let mode = match output_mode.as_str() {
+                        "analyze" => transform::OutputMode::Analyze,
+                        "debug" => transform::OutputMode::Debug,
+                        "full" => transform::OutputMode::Full,
+                        _ => {
+                            eprintln!("Invalid output mode: {}. Valid options are: analyze, debug, full", output_mode);
+                            std::process::exit(1);
+                        }
+                    };
+                    transform::clean_duplicates_and_types(input_dir, output_dir, mode)?;
                 }
             }
         }
