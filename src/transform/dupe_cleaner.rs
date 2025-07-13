@@ -1,6 +1,6 @@
 use crate::common::amplitude_types::ExportEvent;
 use crate::common::parser;
-use crate::transform::model::{Dupe, DataCorrection};
+use crate::transform::model::{DataCorrection, Dupe};
 use itertools::Itertools;
 use std::collections::HashMap;
 use std::fs::{self, File};
@@ -61,7 +61,7 @@ pub fn clean_duplicates_and_types(
     println!("Found {} insert IDs with duplicates", duplicates.len());
 
     if duplicates.is_empty() {
-        println!("No duplicate insert IDs found!");
+        println!("No duplicate insert IDs found! Will skip writing.");
         return Ok(());
     }
 
@@ -77,6 +77,17 @@ pub fn clean_duplicates_and_types(
                     File::create(output_dir.join(format!("non_duplicate_chunk_{idx}.json")))
                         .unwrap();
                 chunk.for_each(|item| {
+                    if item
+                        .event_type
+                        .clone()
+                        .is_some_and(|v| v == "Property Pre-Order Submitted")
+                        && item
+                            .insert_id
+                            .clone()
+                            .is_some_and(|v| !v.starts_with("Property Pre-Order Submitted"))
+                    {
+                        panic!("Inconsistent Property Pre-Order Submission event found");
+                    }
                     file.write(serde_json::to_string(item).unwrap().as_bytes())
                         .unwrap();
                     file.write("\n".as_bytes()).unwrap();
@@ -98,8 +109,7 @@ pub fn clean_duplicates_and_types(
             .enumerate()
             .for_each(|(idx, chunk)| {
                 let mut file =
-                    File::create(output_dir.join(format!("duplicate_chunk_{idx}.json")))
-                        .unwrap();
+                    File::create(output_dir.join(format!("duplicate_chunk_{idx}.json"))).unwrap();
                 chunk.for_each(|item| {
                     file.write(serde_json::to_string(&item).unwrap().as_bytes())
                         .unwrap();
@@ -139,7 +149,6 @@ pub fn clean_duplicates_and_types(
 
     Ok(())
 }
-
 
 /// Sanitize filename by replacing invalid characters
 fn sanitize_filename(filename: &str) -> String {

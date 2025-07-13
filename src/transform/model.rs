@@ -18,36 +18,31 @@ pub enum Dupe {
 
 impl Dupe {
     pub fn resolution(self) -> DataCorrection {
-        match self {
+        match &self {
             Dupe::PreOrderDropCompletedMistake(items) => {
-                let mut submitted_event = None;
-                let mut completed_event = None;
+                let mut event = None;
 
                 for item in items {
                     if let Some(event_type) = &item.event_type {
                         match event_type.as_str() {
-                            "Property Pre-Order Submitted" => submitted_event = Some(item.clone()),
-                            "Property Pre-Order Completed" => completed_event = Some(item.clone()),
+                            "Property Pre-Order Submitted" => {
+                                if !item.insert_id.clone().is_some_and(|v| { v.starts_with("Property Pre-Order Completed")}) {
+                                    return DataCorrection::Error(self);
+                                }
+                                event = Some(item.clone());
+                            },
                             _ => {}
                         }
                     }
                 }
 
-                let mut result_events = Vec::new();
-
-                // Add the submitted event as-is
-                if let Some(submitted) = submitted_event {
-                    result_events.push(submitted);
-                }
-
-                // Add the completed event with modified insert_id
-                if let Some(uncloned_completed) = completed_event {
-                    let mut completed = uncloned_completed.clone();
+                
+                if let Some(mut completed) = event {
                     completed.event_type = Some("Property Pre-Order Completed".to_string());
-                    result_events.push(completed);
+                    DataCorrection::KeepOne(completed)
+                } else {
+                    DataCorrection::Error(self)
                 }
-
-                DataCorrection::KeepMany(result_events)
             }
             Dupe::DropTypeChange(items)
             | Dupe::PropertyNameChange(items)
@@ -184,7 +179,7 @@ impl Dupe {
             Dupe::TooMany(_) => "TooMany",
             Dupe::Multi(_, _) => "Multi",
             Dupe::EventPropsIncompatible(_) => "EventPropsIncompatible",
-            Dupe::UnknownPropDiff(export_events) => "UnknownPropDiff",
+            Dupe::UnknownPropDiff(_) => "UnknownPropDiff",
         }
         .to_string()
     }
