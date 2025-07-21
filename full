@@ -1,0 +1,20 @@
+rm -rf ./output
+
+# TODO: add end date
+cargo run -- project export --start-date 2024-10-01 --end-date 2025-07-18 --project production
+
+
+# Check first
+cargo run -- transform verify-serde --input-dir ./output/export/658833
+cargo run -- transform clean-duplicates --input-dir ./output/export/658833 --output-dir ./output/clean-analysis --output-mode analyze
+
+# Actually clean
+cargo run -- transform clean-duplicates --input-dir ./output/export/658833 --output-dir ./output/cleaned --output-mode full
+
+# Check duplicates are truly cleaned. Should output "will skip writing"
+cargo run -- transform clean-duplicates --input-dir ./output/cleaned --output-dir ./output/cleaned-check --output-mode analyze
+
+# Upload
+cargo run -- project upload --input-dir ./output/cleaned --project test-full
+
+cargo run -- project upload --input-dir ./output/cleaned --project new-production
