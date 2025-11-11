@@ -1,11 +1,54 @@
-use std::fs::{self, File};
+use std::fs::{self, read, File};
 use std::io::{self, BufRead, BufReader, BufWriter};
 use std::path::Path;
+use std::time::Duration;
 
 use chrono::Utc;
+use clap::Parser;
 use flate2::read::GzDecoder;
 use rusqlite::{params, Connection, Result};
 use serde_json::Value;
+
+use anyhow::Result as AnyhowResult;
+use reqwest::blocking::Client;
+use std::io::copy;
+use std::path::PathBuf;
+
+fn start_amplitude_download(
+    api_key: &str,
+    secret_key: &str,
+    start: &str,
+    end: &str,
+    output: &str,
+) -> AnyhowResult<()> {
+    // Build URL
+    let url = format!(
+        "https://amplitude.com/api/2/export?start={}&end={}",
+        start, end
+    );
+
+    // Create HTTP client
+    let client = Client::builder()
+        .timeout(Duration::from_secs(300))
+        .build()
+        .unwrap();
+
+    // Send GET request with Basic Auth
+    let response = client
+        .get(&url)
+        .basic_auth(api_key, Some(secret_key))
+        .send()?
+        .error_for_status()?; // Ensure non-2xx responses are errors
+
+    // Write response body to file
+    let mut file = File::create(output)?;
+    let bytes = response.bytes()?;
+    let mut content = bytes.as_ref();
+    copy(&mut content, &mut file)?;
+
+    println!("Export saved to {output}");
+    Ok(())
+}
 
 // TODO: check that cleanup is executed when re-running
 // TODO: better duplicate detection
@@ -120,18 +163,14 @@ pub fn parse_json_objects_in_dir(dir: &Path) -> io::Result<Vec<ParsedItem>> {
                         io::Error::new(io::ErrorKind::InvalidData, "Missing event name")
                     })?
                     .to_string();
-                let session_id: Option<u64> = json
-                    .get("session_id")
-                    .and_then(|v| {
-                        match v {
-                            Value::Null => None,
-                            Value::Bool(_) => None,
-                            Value::Number(number) => number.as_u64(),
-                            Value::String(_) => None,
-                            Value::Array(_values) => None,
-                            Value::Object(_map) => None,
-                        }
-                    });
+                let session_id: Option<u64> = json.get("session_id").and_then(|v| match v {
+                    Value::Null => None,
+                    Value::Bool(_) => None,
+                    Value::Number(number) => number.as_u64(),
+                    Value::String(_) => None,
+                    Value::Array(_values) => None,
+                    Value::Object(_map) => None,
+                });
                 let screen_name: Option<String> = None;
                 results.push(ParsedItem {
                     user_id,
@@ -243,12 +282,84 @@ fn already_imported(conn: &Connection) -> Result<std::collections::HashSet<Strin
     Ok(set)
 }
 
+fn unzip_file(
+    zip_file_path: &str,
+    extract_to_path: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let file = fs::File::open(zip_file_path)?;
+    let mut archive = zip::ZipArchive::new(file)?;
+
+    for i in 0..archive.len() {
+        let mut file = archive.by_index(i)?;
+        let outpath = match file.enclosed_name() {
+            Some(path) => PathBuf::from(extract_to_path).join(path),
+            None => continue,
+        };
+
+        if (*file.name()).ends_with('/') {
+            // It's a directory, create it
+            fs::create_dir_all(&outpath)?;
+        } else {
+            // It's a file, create parent directories and then the file
+            if let Some(p) = outpath.parent() {
+                if !p.exists() {
+                    fs::create_dir_all(p)?;
+                }
+            }
+            let mut outfile = fs::File::create(&outpath)?;
+            io::copy(&mut file, &mut outfile)?;
+        }
+
+        // Set permissions if available
+        #[cfg(unix)]
+        {
+            if let Some(mode) = file.unix_mode() {
+                use std::os::unix::fs::PermissionsExt;
+
+                fs::set_permissions(&outpath, fs::Permissions::from_mode(mode))?;
+            }
+        }
+    }
+    Ok(())
+}
+
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    /// Amplitude project API key (or set AMPLITUDE_PROJECT_API_KEY env var)
+    #[arg(long, env = "AMPLITUDE_PROJECT_API_KEY")]
+    api_key: String,
+
+    /// Amplitude project secret key (or set AMPLITUDE_PROJECT_SECRET_KEY env var)
+    #[arg(long, env = "AMPLITUDE_PROJECT_SECRET_KEY")]
+    secret_key: String,
+
+    /// Start date in format YYYYMMDDTHH (e.g., 20250101T00)
+    #[arg(long)]
+    start_date: String,
+
+    /// End date in format YYYYMMDDTHH (e.g., 20251022T23)
+    #[arg(long)]
+    end_date: String,
+
+
+    /// Project ID
+    #[arg(long)]
+    project_id: String,
+}
+
 // Main application entry point
 fn main() -> std::io::Result<()> {
-    // Modify this to the unzipped directory
-    let compressed_dir = Path::new("./YOUR_UNZIPPED_DIR");
+    let args = Args::parse();
+
+    let output = "amplitude_export.zip";
+
+    start_amplitude_download(&args.api_key, &args.secret_key, &args.start_date, &args.end_date, &output).unwrap();
+    unzip_file(&output, ".").unwrap();
+
+    let compressed_dir = Path::new(&args.project_id);
     let unzipped_dir = Path::new("./data");
-    let db_path = Path::new("parsed_data.sqlite");
+    let db_path = Path::new("amplitude_data.sqlite");
 
     // Open SQLite connection early to check for already-imported files
     let conn = Connection::open(db_path).expect("Failed to open DB");
@@ -334,7 +445,9 @@ mod tests {
         // Verify SQLite contents
         let conn = Connection::open(&db_path).unwrap();
         let mut stmt = conn
-            .prepare("SELECT uuid, user_id, raw_json, source_file FROM amplitude_events ORDER BY uuid")
+            .prepare(
+                "SELECT uuid, user_id, raw_json, source_file FROM amplitude_events ORDER BY uuid",
+            )
             .unwrap();
 
         let rows = stmt
